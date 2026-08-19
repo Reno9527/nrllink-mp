@@ -4,7 +4,8 @@
 // 注意：不要复用 utils/api.js —— 它绑死了后端 https + 业务码协议。
 
 // esp_http_server 连接槽有限，全局限制并发，扫描时尤其重要。
-const MAX_CONCURRENT = 16;
+// 同时不能超过 wx.request 的历史并发上限（10），否则超限请求直接 fail 漏报设备。
+const MAX_CONCURRENT = 8;
 let active = 0;
 const queue = [];
 

@@ -9,8 +9,6 @@ import { manageKind } from '../../utils/atCatalog.js';
 
 const api = require('../../utils/api');
 const app = getApp()
-let groupData = {}
-let searchInput = ''
 
 Page({
   data: {
@@ -24,10 +22,8 @@ Page({
 
     expandedDetails: {}, // 用于存储每个设备的展开状态
     isAdmin: false, // 当前用户是否管理员（控制远程 AT 入口）
-    showDetails: false, // 控制详细信息显示
     DevStatusOptions: DevStatusOptions, // 添加状态选项
     relayOptions: [],
-    searchInput: '', // 新增搜索输入
     filteredDevices: [], // 新增过滤后的设备列表
     // --- 移除模态框相关 data ---
     // showChangeGroupModal: false, 
@@ -37,14 +33,11 @@ Page({
     availableGroupsForPicker: [] // 用于 Picker 的群组列表
   },
   onLoad(options) {
-    // 绑定所有需要的方法
     //console.log('onLoad-group-detail',app.globalData.currentDevice)
 
-    // this.onSearchInput = this.onSearchInput.bind(this)
-    // this.loadGroupDetail = this.loadGroupDetail.bind(this);
-    // this.loadDeviceList = this.loadDeviceList.bind(this);
-    // this.toggleDetails = this.toggleDetails.bind(this)
-    // this.navigateToDeviceSettings = this.navigateToDeviceSettings.bind(this)
+    // 群组数据与搜索关键字放实例上，避免模块级变量跨页面实例共享
+    this.groupData = null
+    this.searchInput = ''
 
     let currentDevice = app.globalData.currentDevice
     currentDevice.displayName = currentDevice.callsign + '-' + currentDevice.ssid + '-' + currentDevice.dmrid + '-' + currentDevice.id
@@ -55,7 +48,7 @@ Page({
     try {
       if (options && options.group) {
         const group = JSON.parse(decodeURIComponent(options.group))
-        groupData = group // 保存group数据用于刷新
+        this.groupData = group // 保存group数据用于刷新
       } else {
         wx.showToast({
           title: '缺少群组数据',
@@ -73,14 +66,15 @@ Page({
 
   async refreshData() {
     // 管理操作（踢人、改参数等）后调用，绕过缓存强制取最新群组数据
-    let currentGroup = await app.globalData.getGroup(groupData.id, false, true)
+    let currentGroup = await app.globalData.getGroup(this.groupData.id, false, true)
+    this.groupData = currentGroup || this.groupData
     this.loadGroupDetail(currentGroup)
    },
- 
-  loadReayList() {
-    api.fetchRelayList({}).then((response) => {
-      this.relayOptions = response.data.items
-    })
+
+  // 搜索输入：只更新关键字并用已有群组数据重新过滤渲染，不重新请求
+  onSearchInput(e) {
+    this.searchInput = (e.detail.value || '').trim().toLowerCase()
+    this.loadGroupDetail(this.groupData)
   },
 
   // 管理员对在线 ESP32 设备的远程 AT 管理（经服务器中继）
@@ -97,6 +91,7 @@ Page({
   },
 
   formatGoTime(goTime) {
+    goTime = String(goTime || '');
     if (goTime.length >= 19 && goTime.includes("T")) {
       const trimmedTime = goTime.substring(0, 19);
       return trimmedTime.replace("T", " ");
@@ -161,7 +156,7 @@ Page({
     if (!userInfo?.roles?.includes('admin') && device.callsign !== currentCallsign) {
       wx.showToast({
         title: '权限不够',
-        icon: 'errorerror'
+        icon: 'error'
       });
       return
     }
@@ -189,12 +184,15 @@ Page({
     device.status = status
 
     try {
-      await api.updateDevice({
+      const res = await api.updateDevice({
         ...device,
         status: status,
         last_voice_begin_time: "0001-01-01T00:00:00Z",
         last_voice_end_time: "0001-01-01T00:00:00Z",
       });
+
+      // 业务失败（如 20001）时拦截器已 toast 错误，这里直接返回
+      if (res === undefined) return;
 
       wx.showToast({
         title: '状态更新成功',
@@ -247,7 +245,7 @@ Page({
 
 
       // 调用 API 更新设备群组
-      await api.updateDevice({
+      const res = await api.updateDevice({
         ...deviceToChange, // 传入完整的设备信息
         group_id: newGroupId, // 更新 group_id
         // 确保时间字段被正确处理，如果API需要特定格式或不需要这些字段，请调整
@@ -255,6 +253,8 @@ Page({
         last_voice_end_time: "0001-01-01T00:00:00Z",
       })
 
+      // 业务失败（如 20001）时拦截器已 toast 错误，这里直接返回
+      if (res === undefined) return;
 
       wx.showToast({ title: '切换成功',  duration: 3000,  icon: 'success' });
 
@@ -332,7 +332,7 @@ Page({
 
     try {
       const devlist = Object.values(group.devmap || {});
-      const devices = devlist.filter(device => device.callsign.toLowerCase().includes(searchInput));
+      const devices = devlist.filter(device => (device.callsign || '').toLowerCase().includes(this.searchInput));
 
       devices.sort((a, b) => {
         if (a.is_online === b.is_online) return 0;
@@ -433,7 +433,7 @@ Page({
   onShow() {
     // 每次显示页面时都刷新数据和群组列表
     // 公共大厅 id 为 0，不能用 falsy 判断
-    if (groupData && groupData.id !== undefined && groupData.id !== null) { // 确保 groupData 有效
+    if (this.groupData && this.groupData.id !== undefined && this.groupData.id !== null) { // 确保 groupData 有效
       this.refreshData();
     } else {
        console.warn("Missing groupData in onShow, cannot refresh group details.");
@@ -443,6 +443,15 @@ Page({
   },
 
   async onPullDownRefresh() {
+    // groupData 未成功解析时没有 id 可刷新，直接提示并结束下拉动画
+    if (!this.groupData) {
+      wx.showToast({
+        title: '群组数据无效，无法刷新',
+        icon: 'none'
+      })
+      wx.stopPullDownRefresh();
+      return;
+    }
     // 下拉刷新需要重新请求 group/get 拿最新数据，而不是用进入页面时的旧数据
     try {
       await this.refreshData();
@@ -454,8 +463,7 @@ Page({
   toggleDetails(e) {
     const index = e.currentTarget.dataset.index;
     this.setData({
-      [`expandedDetails.${index}`]: !this.data.expandedDetails[index],
-      showDetails: !this.data.showDetails
+      [`expandedDetails.${index}`]: !this.data.expandedDetails[index]
     });
   },
 

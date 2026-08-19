@@ -86,6 +86,8 @@ Page({
   },
 
   onUnload() {
+    // 置位销毁标志并停掉所有轮询（OTA 定时器 + checkOta 的 12 秒状态轮询）
+    this._destroyed = true;
     this.stopOtaPoll();
   },
 
@@ -349,6 +351,7 @@ Page({
         // 设备后台检查，轮询几次状态
         for (let i = 0; i < 6; i++) {
           await new Promise((r) => setTimeout(r, 2000));
+          if (this._destroyed) return;
           await this.loadOta();
           if (this.data.ota && !this.data.ota.checking) break;
         }

@@ -16,6 +16,7 @@ Page({
   data: {
     devices: [],
     loaded: false,
+    loadError: false,
     groups: [],
     showGroupPicker: false,
     currentGroupId: 0,
@@ -47,7 +48,7 @@ Page({
       // 注意：code 20001 时请求封装会返回 undefined，此时保留旧列表，不清空
       if (!res || !res.items) {
         console.warn('loadDevices: 接口未返回设备列表', res);
-        this.setData({ loaded: true, groups });
+        this.setData({ loaded: true, groups, loadError: false });
         return;
       }
       const items = res.items;
@@ -63,10 +64,11 @@ Page({
       });
       // 在线的排前面
       list.sort((a, b) => (b.is_online ? 1 : 0) - (a.is_online ? 1 : 0));
-      this.setData({ devices: list, loaded: true, groups });
+      this.setData({ devices: list, loaded: true, groups, loadError: false });
     } catch (e) {
       console.error('loadDevices: 获取设备列表失败', e);
-      this.setData({ loaded: true, groups });
+      this.setData({ loaded: true, groups, loadError: true });
+      wx.showToast({ title: '加载设备列表失败，点击页面重试', icon: 'none' });
     }
   },
 

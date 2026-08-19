@@ -28,7 +28,6 @@ Page({
     deviceCount: 0,
     serverConfig: {},
     chatLogs: [],
-    lastMessageTime: null,
     lastVoiceTime: null,
     CallSign: null,
     SSID: null,
@@ -130,6 +129,8 @@ Page({
     });
     this.heartbeatBuffer = heartbeatPacket.getBuffer();
 
+    // heartbeatBuffer 为空时会走到这里重建 client；先关旧的，避免双 socket 双份播放
+    this.closeUdpClient();
     app.globalData.udpClient = new udp.UDPClient({
       host: app.globalData.serverConfig.host,
       port: app.globalData.serverConfig.port,
@@ -179,11 +180,18 @@ Page({
     await this.recoverVoiceRuntime({ clearAudio: true });
   },
 
-  handleAppHide() {
+  async handleAppHide() {
+    // 退后台时:长按(按住发射)模式停掉;短按锁定模式按用户意图继续发射
+    if (this.data.isTalking && this.pttHoldMode) {
+      await this.recorderService.stopRecording();
+    }
     this.clearAudioBuffer();
   },
 
   async recoverVoiceRuntime({ clearAudio = false } = {}) {
+    // onHide/onUnload 会 dispose VoiceService，回到前台时复位
+    if (this.voiceService) this.voiceService.disposed = false;
+
     if (clearAudio) {
       this.clearAudioBuffer();
     }
@@ -205,7 +213,7 @@ Page({
       this.foregroundHeartbeatCheckTimer = null;
 
       const hasForegroundHeartbeatReply =
-        this.data.lastMessageTime && this.data.lastMessageTime >= recoveryStartedAt;
+        this.lastMessageTime && this.lastMessageTime >= recoveryStartedAt;
 
       if (!hasForegroundHeartbeatReply) {
         this.closeUdpClient();
@@ -226,8 +234,13 @@ Page({
     app.globalData.udpClient = null;
   },
 
-  onHide() {
+  async onHide() {
     this.stopGroupRefreshTimer();
+    // 切页面时:长按(按住发射)模式停掉;短按锁定模式继续发射,回来再按停止
+    if (this.data.isTalking && this.pttHoldMode) {
+      await this.recorderService.stopRecording();
+    }
+    if (this.voiceService) this.voiceService.dispose();
   },
 
   onUnload() {
@@ -238,6 +251,13 @@ Page({
     }
     this.stopHeartbeat();
     if (this.connectionCheckTimer) clearInterval(this.connectionCheckTimer);
+    if (this.voiceService) this.voiceService.dispose();
+    // 不关闭 UDP socket 的话，卸载后旧 onMessage 闭包仍会对死页面收包出声
+    this.closeUdpClient();
+    if (this.currentAudioCtx) {
+      this.currentAudioCtx.destroy();
+      this.currentAudioCtx = null;
+    }
   },
 
   startGroupRefreshTimer() {
@@ -347,7 +367,9 @@ Page({
   },
 
   checkConnection() {
-    if (this.data.lastMessageTime && Date.now() - this.data.lastMessageTime > 6000) {
+    // 已断线状态下不重复 setData
+    if (!this.data.serverConnected) return;
+    if (this.lastMessageTime && Date.now() - this.lastMessageTime > 6000) {
       this.setData({ serverConnected: false });
     }
   },
@@ -396,10 +418,35 @@ Page({
     this.voiceService.addChatLog(newLog);
   },
 
+  // PTT 两种模式:
+  // - 短按:切换(锁定)发射,切页面不停止,回来再按一次停止
+  // - 长按:按住发射,松开即停
+  onPttLongPress() {
+    if (this.data.isTalking) return;
+    this.pttHoldMode = true;
+    app.globalData.recoderStartTime = Date.now();
+    this.recorderService.startRecording();
+  },
+
+  onPttTouchEnd() {
+    if (!this.pttHoldMode) return;
+    this.pttHoldMode = false;
+    // 长按松开后微信还会补发一个 tap,不能当成短按又开发射
+    this.ignoreNextPttTap = true;
+    if (this.data.isTalking || this.recorderService.startPromise) {
+      this.recorderService.stopRecording();
+    }
+  },
+
   async toggleTalk() {
+    if (this.ignoreNextPttTap) {
+      this.ignoreNextPttTap = false;
+      return;
+    }
     if (this.data.isTalking) {
       await this.recorderService.stopRecording();
     } else {
+      this.pttHoldMode = false; // 短按为锁定模式
       app.globalData.recoderStartTime = Date.now();
       await this.recorderService.startRecording();
     }
@@ -650,6 +697,9 @@ Page({
     this.isSwitching = true;
     wx.showLoading({ title: '正在切换...' });
 
+    // 提到 try 外，登录网络异常时 catch 里才能回滚 globalData.serverConfig
+    const oldConfig = { ...app.globalData.serverConfig };
+
     try {
       // 1. Save credentials
       const serverCredentials = wx.getStorageSync('serverCredentials') || {};
@@ -660,7 +710,6 @@ Page({
       const api = require('../../utils/api');
 
       // Update global config temporarily for login
-      const oldConfig = { ...app.globalData.serverConfig };
       app.globalData.serverConfig = {
         name: selectedServer.name,
         host: selectedServer.host,
@@ -719,8 +768,9 @@ Page({
 
     } catch (err) {
       console.error('Switch Error:', err);
-      // Revert config on error
-      // Ideally we should track "oldConfig" better, but simple revert for now
+      // Revert config on error: globalData.serverConfig may already point at
+      // the new server while UDP/heartbeat are still on the old connection
+      app.globalData.serverConfig = oldConfig;
       wx.showToast({ title: err.message || '切换失败', icon: 'none' });
     } finally {
       this.isSwitching = false;

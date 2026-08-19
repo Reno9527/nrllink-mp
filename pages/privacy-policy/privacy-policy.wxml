@@ -36,7 +36,7 @@
       <view class="section-title">三、信息存储</view>
       <view class="item">1. 本地存储：通话记录、文本消息等数据存储在您的设备内存，小程序重启后自动清除。</view>
       <view class="item">2. 服务器存储：仅存储账号信息、群组信息等必要数据，用于提供服务。</view>
-      <view class="item">3. 密码安全：您的密码使用Keychain安全存储，并采用加密传输。</view>
+      <view class="item">3. 密码安全：您的账号与密码仅保存在您本设备的小程序本地存储中，不会上传到除您所选服务器外的任何地方，并采用加密传输。</view>
     </view>
 
     <view class="section">
@@ -60,7 +60,7 @@
       <view class="section-title">六、数据安全</view>
       <view class="paragraph">我们采取以下措施保护您的数据安全：</view>
       <view class="item">1. 所有网络通信均使用 HTTPS 加密传输。</view>
-      <view class="item">2. 密码等敏感信息使用 Keychain 安全存储。</view>
+      <view class="item">2. 账号与密码等敏感信息仅保存在您本设备的小程序本地存储中，不会上传到除您所选服务器外的任何地方。</view>
       <view class="item">3. 服务器采用安全防护措施。</view>
     </view>
 

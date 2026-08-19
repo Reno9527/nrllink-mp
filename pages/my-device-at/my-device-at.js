@@ -74,6 +74,12 @@ Page({
     this.initDevice();
   },
 
+  onUnload() {
+    // 置位销毁标志：进行中的 exec 轮询 / refreshCategory 串行循环在下次
+    // 迭代时退出，避免页面销毁后继续发请求、对死页面 setData
+    this._destroyed = true;
+  },
+
   // 进页：取设备最新状态（顺便拿上次 AT 回复回填），在线则发 AT+READ 全量查询
   async initDevice() {
     if (this._isLan) {
@@ -141,6 +147,7 @@ Page({
     // 回复是异步的，轮询等刷新
     for (let i = 0; i < POLL_TIMES && !fresh; i++) {
       await sleep(POLL_INTERVAL);
+      if (this._destroyed) return false;
       try {
         const res = await api.getDevice({
           callsign: this.data.device.callsign,
@@ -300,6 +307,7 @@ Page({
     const cat = this.data.categories.find((c) => c.id === id);
     if (!cat) return;
     for (const cmd of cat.commands) {
+      if (this._destroyed) return;
       if (cmd.type === 'action') continue;
       if (this.data.pending[cmd.key]) continue;
       await this.exec(cmd.key, '?', { silentLog: true });

@@ -9,8 +9,6 @@
 // not support AudioWorklet, so this is the only off-main-thread option.
 console.log('audioPlayer.js loaded');
 
-import * as g711 from './audioG711';
-
 const DEFAULT_SAMPLE_RATE = 8000;
 const MAX_INPUT_SAMPLE_RATE = 16000;
 // How far ahead of currentTime new audio is scheduled. This is the jitter
@@ -40,8 +38,6 @@ const gainNode = webAudioContext.createGain();
 gainNode.connect(webAudioContext.destination);
 // Was 2.5, which clips loud speech at the DAC on iOS (crackling/distortion).
 gainNode.gain.value = 1.0;
-
-const g711Codec = new g711.G711Codec();
 
 function initWebAudio() {
     if (isWebAudioInitialized) return;
@@ -112,17 +108,6 @@ function isRunning() {
     return webAudioContext.state === 'running';
 }
 
-// Receive G.711 data and decode it. Kept for compatibility with old callers.
-async function play(data, type) {
-    if (type !== 1) return;
-
-    const pcmData = new Int16Array(data.length);
-    for (let i = 0; i < data.length; i++) {
-        pcmData[i] = g711Codec.alaw2linear(data[i]);
-    }
-    playPCM(pcmData);
-}
-
 function playPCM(pcmData, options = {}) {
     if (!pcmData || pcmData.length === 0) return;
 
@@ -179,10 +164,18 @@ function playPCM(pcmData, options = {}) {
 
 function resetJitterBuffer({ keepStreamId = false } = {}) {
     for (const source of activeSources) {
+        // disconnect() is legal in any state and silences the source at once;
+        // stop() throws InvalidStateError for sources not yet started, which
+        // would leave them audible but already dropped from activeSources.
+        try {
+            source.disconnect();
+        } catch (err) {
+            // Already disconnected; harmless.
+        }
         try {
             source.stop();
         } catch (err) {
-            // Already ended; harmless.
+            // Not started yet or already ended; harmless.
         }
     }
     activeSources.clear();
@@ -208,7 +201,6 @@ function getBufferStats() {
 
 module.exports = {
     initWebAudio,
-    play,
     playPCM,
     suspend,
     resume,

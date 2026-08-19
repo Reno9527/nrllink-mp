@@ -10,9 +10,9 @@ Page({
     mail: '',
     license: '',
     certificate: '',
-    name: '',
     host: '',
-    serverConfig: null
+    serverConfig: null,
+    agreedPolicies: false
   },
 
   onLoad: function (options) {
@@ -24,10 +24,11 @@ Page({
   },
 
   chooseLicense() {
-    wx.chooseImage({
+    wx.chooseMedia({
       count: 1,
+      mediaType: ['image'],
       success: async (res) => {
-        const tempFilePath = res.tempFilePaths[0];
+        const tempFilePath = res.tempFiles[0].tempFilePath;
         wx.showLoading({ title: '正在压缩照片中...' });
         try {
           const compressedPath = await this.compressImageToLimit(tempFilePath);
@@ -69,6 +70,14 @@ Page({
 
   onSubmit(e) {
     const formData = e.detail.value;
+
+    if (!this.data.agreedPolicies) {
+      wx.showToast({
+        title: '请先阅读并同意用户服务协议和隐私政策',
+        icon: 'none'
+      });
+      return;
+    }
 
     // 字段验证
     if (!formData.callsign || !/^[A-Z0-9]{5,6}$/.test(formData.callsign)) {
@@ -130,7 +139,8 @@ Page({
     formData.license = this.data.license;
 
     wx.showLoading({
-      title: '注册中...'
+      title: '注册中...',
+      mask: true
     });
 
     register(formData, this.data.host).then((res) => {
@@ -175,6 +185,24 @@ Page({
         title: err.message || '注册失败',
         icon: 'none'
       });
+    });
+  },
+
+  onAgreementChange(e) {
+    this.setData({
+      agreedPolicies: e.detail.value.includes('agree')
+    });
+  },
+
+  openUserAgreement() {
+    wx.navigateTo({
+      url: '/pages/user-agreement/user-agreement'
+    });
+  },
+
+  openPrivacyPolicy() {
+    wx.navigateTo({
+      url: '/pages/privacy-policy/privacy-policy'
     });
   }
 })

@@ -111,7 +111,6 @@ export class MDC1200Encoder {
         // 1. CRC (保持不变)
         const crcInput = dataArray.slice(offset, offset + 4);
         let ccrc = this._docrc(crcInput, 4);
-        console.log(`JS CRC: ${ccrc.toString(16).padStart(4, '0')} (LSB: ${(ccrc & 0xff).toString(16).padStart(2, '0')}, MSB: ${((ccrc >> 8) & 0xff).toString(16).padStart(2, '0')})`);
         dataArray[offset + 4] = ccrc & 0x00ff;
         dataArray[offset + 5] = (ccrc >> 8) & 0x00ff;
         dataArray[offset + 6] = 0;
@@ -151,12 +150,6 @@ export class MDC1200Encoder {
             dataArray[offset + 7 + i] = currentOutputByte;
         }
 
-        // --- PRINT AFTER ECC (BEFORE INTERLEAVE) ---
-        let afterEccBytes = [];
-        for (let i = 0; i < 14; i++) afterEccBytes.push(dataArray[offset + i].toString(16).padStart(2, '0').toUpperCase());
-        console.log(`JS After ECC (Before Interleave): ${afterEccBytes.join(' ')}`);
-
-
         // 4. Interleaving (保持不变)
         let lbits = new Array(112);
         let k = 0;
@@ -179,11 +172,6 @@ export class MDC1200Encoder {
             }
             dataArray[offset + i] = outputByte;
         }
-
-        // --- PRINT FINAL OUTPUT (AFTER INTERLEAVE) ---
-        let finalBytes = [];
-        for (let i = 0; i < 14; i++) finalBytes.push(dataArray[offset + i].toString(16).padStart(2, '0').toUpperCase());
-        console.log(`JS Final Output (After Interleave): ${finalBytes.join(' ')}`);
 
         return offset + 14;
     }
@@ -344,7 +332,6 @@ export class MDC1200Encoder {
             this.lb = 0;   // Initial last bit matches C code
             // Set the countdown for repeating data[0] based on preamble_set
             this.preamble_count = this.preamble_set;
-            console.log(`Starting sample generation. Preamble repeats: ${this.preamble_count}`);
         }
 
         // Generate samples into a *new* buffer (more JS-like than C's pass-in buffer)
@@ -377,9 +364,6 @@ export class MDC1200Encoder {
         // If encoding finished naturally (state became 0)
         if (this.state === 0) {
             this.loaded = 0; // Reset loaded flag, ready for next packet
-            console.log(`Encoding finished naturally after ${count} samples.`);
-        } else {
-            console.log(`Sample generation stopped after ${count} samples (bufferSize limit?). State: ${this.state}`);
         }
 
         // Return the generated samples as an Int16Array

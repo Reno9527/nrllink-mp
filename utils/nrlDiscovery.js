@@ -203,15 +203,23 @@ function saveDevices(devices) {
   wx.setStorageSync(DEVICES_KEY, devices);
 }
 
-// 合并扫描结果进缓存（按 ip 去重，更新 lastSeen/online/name）
+// 合并扫描结果进缓存（deviceId 优先、其次 ip 去重，更新 lastSeen/online/name）
 function mergeDevices(fresh) {
   const cached = loadDevices();
-  const byIp = {};
-  cached.forEach((d) => { byIp[d.ip] = d; });
-  fresh.forEach((d) => {
-    byIp[d.ip] = Object.assign({}, byIp[d.ip], d, { online: true });
+  // 先把缓存全部置为离线，再由本次扫描结果覆盖，避免下线设备永远显示在线
+  const byId = {};
+  cached.forEach((d) => {
+    d.online = false;
+    byId[d.deviceId || d.ip] = d;
   });
-  const merged = Object.keys(byIp).map((ip) => byIp[ip]);
+  fresh.forEach((d) => {
+    const key = d.deviceId || d.ip;
+    // 旧缓存可能没有 deviceId 而按 ip 存储，同 ip 条目并入新 key，避免设备换 IP 出现两条
+    const legacy = key !== d.ip ? byId[d.ip] : null;
+    if (legacy) delete byId[d.ip];
+    byId[key] = Object.assign({}, legacy, byId[key], d, { online: true });
+  });
+  const merged = Object.keys(byId).map((key) => byId[key]);
   saveDevices(merged);
   return merged;
 }

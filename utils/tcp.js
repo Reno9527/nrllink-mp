@@ -8,13 +8,18 @@ class TCPClient {
 
   async connect() {
     return new Promise((resolve, reject) => {
+      const app = getApp()
+      const callSign = app.globalData.userInfo && app.globalData.userInfo.callsign;
+      const passcode = app.globalData.passcode; // 登录成功后写入，无凭据则拒绝连接
+      if (!callSign || passcode == null) {
+        reject(new Error('缺少APRS登录凭据，请先登录'));
+        return;
+      }
+
       this.socket = wx.createTCPSocket();
 
       this.socket.onConnect(() => {
         console.log('TCP连接成功');
-        const app = getApp()
-        const callSign = app.globalData.userInfo.callsign;
-        const passcode = app.globalData.passcode || 21942; // 使用全局变量中的passcode
         const loginPacket = `user ${callSign} pass ${passcode} vers NRLLink 1.0\n`;        
         this.socket.write(loginPacket);
         //console.log('成功发送登录包:', loginPacket); 
@@ -22,41 +27,20 @@ class TCPClient {
       });
 
       this.socket.onMessage((res) => {
-        // if (typeof res.message === 'string') {
-           this.onMessage(res);
-        // }
-       });
- 
+        this.onMessage(res);
+      });
+
+      this.socket.onClose(() => {
+        console.log('TCP连接关闭');
+        this.socket = null;
+      });
 
       this.socket.onError((err) => {
         console.error('TCP连接错误:', err);
+        this.socket = null;
         reject(err);
       });
 
-      this.socket.offConnect((err) => {
-        console.error('TCP连接断开:', err);
-        reject(err);
-      });
-
-      this.socket.offClose((err) => {
-        console.error('TCP连接关闭:', err);
-        reject(err);
-      });
-
-      this.socket.offError((err) => {
-        console.error('TCP连接关闭错误:', err);
-        reject(err);
-      });
-
-      
-      this.socket.offMessage((res) => {
-        // if (typeof res.message === 'string') {
-           this.onMessage(res);
-        // }
-       });
-
-
-    
       this.socket.connect({
         address: this.host,
         port: this.port
@@ -69,9 +53,9 @@ class TCPClient {
     try {
       if (!this.socket ) {
         await this.connect();       
-  
       }   
-      await this.socket.write(data)
+      // TCPSocket.write 无回调/Promise，写失败会在 onError 中感知
+      this.socket.write(data)
     } catch (err) {
       
       console.log( '发送数据失败:', err); 

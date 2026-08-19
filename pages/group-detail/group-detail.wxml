@@ -32,7 +32,7 @@
     <!-- Search Box -->
 
 
-    <view class="device-item" wx:for="{{filteredDevices}}" wx:key="deviceId" data-device="{{item}}">
+    <view class="device-item" wx:for="{{filteredDevices}}" wx:key="id" data-device="{{item}}">
       <view class="title-container">
         <view class="title-row">
           <!-- <text class="title-label">设备：</text> -->
@@ -90,8 +90,8 @@
       
       <!-- Removed extra closing view tag that caused the error -->
       
-      <!-- Display deviceName (assuming this is intended) -->
-      <view class="name">{{item.deviceName}}</view> 
+      <!-- Display device name -->
+      <view class="name">{{item.name}}</view> 
      
       <view class="collapsible-toggle" bindtap="toggleDetails" data-index="{{index}}">
         <text>{{item.name}}</text>

@@ -15,7 +15,7 @@ Page({
       { name: '徐州HAM互联', host: 'bd4two.nrlptt.com', port: 60050 },
       { name: 'BH4TDV实验场', host: 'bh4tdv.nrlptt.com', port: 60050 }
     ],
-    serverIndex: 1, // Default to NRLPTT主站
+    serverIndex: 1, // 默认江苏省无线电运动协会
     customServer: '',
     selectedOption: 'predefined', // Add selectedOption to track the selection
     showServerModal: false, // 控制服务器选择弹窗显示
@@ -27,6 +27,15 @@ Page({
     ]
   },
 
+  // 读取某台服务器保存的凭据。按 host 关联（服务器列表动态下发，下标会错位）；
+  // 兼容旧版按下标存储的数据。
+  getSavedCredentials(serverIndex) {
+    const server = this.data.serverList[serverIndex];
+    if (!server || !server.host) return null;
+    const serverCredentials = wx.getStorageSync('serverCredentials') || {};
+    return serverCredentials[server.host] || serverCredentials[serverIndex] || null;
+  },
+
   bindServerChange(e) {
     const newServerIndex = e.detail.value;
     this.setData({
@@ -34,8 +43,7 @@ Page({
       selectedOption: 'predefined' // Set selectedOption to predefined when server is selected
     });
 
-    const serverCredentials = wx.getStorageSync('serverCredentials') || {};
-    const currentServerCreds = serverCredentials[newServerIndex];
+    const currentServerCreds = this.getSavedCredentials(newServerIndex);
 
     if (currentServerCreds) {
       this.setData({
@@ -58,23 +66,55 @@ Page({
   },
 
   onLoad() {
-    this.getPlatformList();
-
-    const serverCredentials = wx.getStorageSync('serverCredentials') || {};
-    const savedServerIndex = wx.getStorageSync('savedServerIndex');
-    if (savedServerIndex !== undefined) {
-      this.setData({
-        serverIndex: savedServerIndex
-      });
+    // 已有有效登录态时直接恢复并进入语音页；缺任何字段都走正常登录流程
+    const token = wx.getStorageSync('token');
+    const userInfo = wx.getStorageSync('userInfo');
+    const savedServerConfig = wx.getStorageSync('serverConfig');
+    if (token && userInfo && userInfo.callsign && savedServerConfig && savedServerConfig.host) {
+      app.globalData.serverConfig = savedServerConfig;
+      app.globalData.token = token;
+      app.globalData.userInfo = userInfo;
+      app.globalData.passcode = generateAPRSPasscode(userInfo.callsign);
+      wx.switchTab({ url: '/pages/voice/voice' });
+      return;
     }
 
-    const currentServerCreds = serverCredentials[this.data.serverIndex];
+    this.getPlatformList();
+
+    this.restoreServerSelection();
+
+    const currentServerCreds = this.getSavedCredentials(this.data.serverIndex);
     if (currentServerCreds) {
       this.setData({
         username: currentServerCreds.username,
         password: currentServerCreds.password
       });
     }
+  },
+
+  // 服务器列表由 getPlatformList 动态下发，下标会错位：优先按 host 恢复选中项，
+  // 找不到回退到旧版 savedServerIndex 下标逻辑（兼容老用户），都无效取 0
+  restoreServerSelection() {
+    const savedHost = wx.getStorageSync('savedServerHost');
+    if (savedHost) {
+      const hostIndex = this.data.serverList.findIndex(server => server.host === savedHost);
+      if (hostIndex >= 0) {
+        this.setData({ serverIndex: hostIndex });
+        return;
+      }
+    }
+
+    // getStorageSync 在键不存在时返回 ''，需要显式排除
+    const savedServerIndex = wx.getStorageSync('savedServerIndex');
+    if (savedServerIndex !== '' && savedServerIndex !== undefined && savedServerIndex !== null) {
+      const index = Number(savedServerIndex);
+      if (Number.isInteger(index) && index >= 0 && index < this.data.serverList.length) {
+        this.setData({ serverIndex: index });
+        return;
+      }
+    }
+
+    this.setData({ serverIndex: 0 });
   },
 
   inputUsername(e) {
@@ -106,25 +146,12 @@ Page({
       return;
     }
 
-    try {
-      const serverCredentials = wx.getStorageSync('serverCredentials') || {};
-      serverCredentials[this.data.serverIndex] = { username, password };
-      wx.setStorageSync('serverCredentials', serverCredentials);
-      wx.setStorageSync('savedServerIndex', this.data.serverIndex);
-    } catch (err) {
-      wx.showToast({
-        title: '存储失败，请检查存储空间',
-        icon: 'none'
-      });
-      console.error('存储失败:', err);
-    }
-
     this.setData({ loading: true });
 
     const api = require('../../utils/api');
 
     const selectedServer = this.data.selectedOption === 'predefined'
-      ? this.data.serverList[this.data.serverIndex]
+      ? (this.data.serverList[this.data.serverIndex] || this.data.serverList[0])
       : { host: this.data.customServer };
 
     app.globalData.serverConfig = {
@@ -135,10 +162,26 @@ Page({
 
     api.login({ username, password })
       .then(res => {
-        if (res.token) {
+        if (res && res.token) {
           wx.setStorageSync('token', res.token);
+
+          // 登录成功后再保存凭据，按 host 关联避免服务器列表变动错位
+          try {
+            if (selectedServer && selectedServer.host) {
+              const serverCredentials = wx.getStorageSync('serverCredentials') || {};
+              serverCredentials[selectedServer.host] = { username, password };
+              wx.setStorageSync('serverCredentials', serverCredentials);
+              wx.setStorageSync('savedServerIndex', this.data.serverIndex);
+              wx.setStorageSync('savedServerHost', selectedServer.host);
+              wx.setStorageSync('serverConfig', app.globalData.serverConfig);
+            }
+          } catch (err) {
+            console.error('存储失败:', err);
+          }
+
           this.getUserInfo();
-        } else {
+        } else if (res !== undefined) {
+          // res === undefined 时拦截器已 toast 业务错误，不再重复提示
           wx.showToast({
             title: '用户名或者密码错',
             icon: 'none'
@@ -201,6 +244,15 @@ Page({
         this.setData({
           serverList: res.data.data.items,
         });
+        // 列表下发后下标可能变化，按 host 重新恢复选中项并回显凭据
+        this.restoreServerSelection();
+        const currentServerCreds = this.getSavedCredentials(this.data.serverIndex);
+        if (currentServerCreds) {
+          this.setData({
+            username: currentServerCreds.username,
+            password: currentServerCreds.password
+          });
+        }
       },
       fail: (err) => {
         console.error('请求失败：', err);
@@ -238,8 +290,7 @@ Page({
     });
 
     // 加载该服务器保存的账号密码
-    const serverCredentials = wx.getStorageSync('serverCredentials') || {};
-    const currentServerCreds = serverCredentials[index];
+    const currentServerCreds = this.getSavedCredentials(index);
 
     if (currentServerCreds) {
       this.setData({

@@ -7,6 +7,8 @@ import * as opus from '../../utils/audioOpus';
 const app = getApp();
 const G711_SAMPLE_RATE = 8000;
 const G711_PACKET_SIZE = 160;
+// Opus 编码慢于实时时 sendQueue 会无限涨（延迟单调累积），超上限丢最旧帧
+const MAX_SEND_QUEUE_FRAMES = 100;
 
 function appendUint8(left, right) {
     const result = new Uint8Array(left.length + right.length);
@@ -33,6 +35,8 @@ export class RecorderService {
         this.voicePacketCount = 0;
         this.activeCodec = 'g711';
         this.activeSampleRate = G711_SAMPLE_RATE;
+        this.startPromise = null;
+        this.stopPromise = null;
     }
 
     async checkAudioPermission() {
@@ -84,7 +88,25 @@ export class RecorderService {
         return app.globalData.udpClient.send(packet);
     }
 
+    enqueuePayload(payload) {
+        this.sendQueue.push(payload);
+        if (this.sendQueue.length > MAX_SEND_QUEUE_FRAMES) this.sendQueue.shift();
+    }
+
     async startRecording() {
+        // setData 异步且 doStartRecording 中有多个 await，快速双击会重入；
+        // 仿照 stopPromise 模式，重入直接返回同一个 Promise
+        if (this.startPromise) return this.startPromise;
+
+        this.startPromise = this.doStartRecording();
+        try {
+            await this.startPromise;
+        } finally {
+            this.startPromise = null;
+        }
+    }
+
+    async doStartRecording() {
         if (this.page.data.isTalking) return;
 
         const codec = this.page.data.codec === 'opus' ? 'opus' : 'g711';
@@ -99,6 +121,12 @@ export class RecorderService {
         }
         if (!await this.ensureSelectedCodec(codec)) return;
 
+        // 等待权限/Opus 初始化期间用户已要求停止(如长按已松开)
+        if (this.cancelStartRequested) {
+            this.cancelStartRequested = false;
+            return;
+        }
+
         this.activeCodec = codec;
         this.activeSampleRate = codec === 'opus' ? opus.OPUS_SAMPLE_RATE : G711_SAMPLE_RATE;
         this.page.setData({ isTalking: true });
@@ -110,6 +138,15 @@ export class RecorderService {
         } catch (err) {
             console.error('Recorder start failed:', err);
             wx.showToast({ title: '录音启动失败', icon: 'none' });
+            this.page.setData({ isTalking: false });
+            return;
+        }
+
+        // 等待录音启动期间用户已松开,立刻停掉,避免麦克风常开
+        if (this.cancelStartRequested) {
+            this.cancelStartRequested = false;
+            recoder.stopRecording(this.recorder);
+            this.recorder = null;
             this.page.setData({ isTalking: false });
             return;
         }
@@ -136,7 +173,7 @@ export class RecorderService {
                     if (codec === 'g711') {
                         g711Buffer = appendUint8(g711Buffer, encoded);
                         while (g711Buffer.length >= G711_PACKET_SIZE) {
-                            this.sendQueue.push(g711Buffer.slice(0, G711_PACKET_SIZE));
+                            this.enqueuePayload(g711Buffer.slice(0, G711_PACKET_SIZE));
                             g711Buffer = g711Buffer.slice(G711_PACKET_SIZE);
                         }
                         continue;
@@ -146,11 +183,13 @@ export class RecorderService {
                     while (opusPcmBuffer.length >= opus.OPUS_FRAME_SIZE) {
                         const pcmFrame = opusPcmBuffer.slice(0, opus.OPUS_FRAME_SIZE);
                         opusPcmBuffer = opusPcmBuffer.slice(opus.OPUS_FRAME_SIZE);
-                        this.sendQueue.push(await opus.encodeFrame(pcmFrame));
+                        this.enqueuePayload(await opus.encodeFrame(pcmFrame));
                     }
                 } catch (err) {
                     console.error('Recording process error:', err);
-                    this.page.setData({ isTalking: false });
+                    // 不能 await：finishRecording 会 await audioProcessor（即本函数），
+                    // await 会形成循环等待死锁；stopPromise 守卫已防重入
+                    this.stopRecording();
                     break;
                 }
             }
@@ -159,6 +198,10 @@ export class RecorderService {
     }
 
     async flushQueuedFrames(codec) {
+        // 积压过多时只补发最新一段，避免停止后按 20ms 补发拖长尾
+        if (this.sendQueue.length > MAX_SEND_QUEUE_FRAMES) {
+            this.sendQueue = this.sendQueue.slice(-MAX_SEND_QUEUE_FRAMES);
+        }
         while (this.sendQueue.length > 0) {
             const payload = this.sendQueue.shift();
             this.sendVoicePayload(codec === 'opus' ? 8 : 1, payload);
@@ -167,6 +210,16 @@ export class RecorderService {
     }
 
     async stopRecording() {
+        // 启动流程还在跑(权限/Opus 初始化中)就收到停止(如长按已松开):
+        // 标记取消并等启动落地,避免录音启动后无人停止
+        if (this.startPromise) {
+            this.cancelStartRequested = true;
+            try {
+                await this.startPromise;
+            } catch (err) {
+                // 启动失败无需处理,后续 finishRecording 是空操作
+            }
+        }
         if (this.stopPromise) return this.stopPromise;
 
         this.stopPromise = this.finishRecording();
@@ -217,6 +270,7 @@ export class RecorderService {
                 filePath,
                 timestamp: nrlHelpers.formatLastVoiceTime(Date.now())
             });
+            audioUtils.cleanupOldFiles();
 
             // Send MDC tail tone using the same codec as the voice transmission.
             // Opus MDC frames are pre-encoded in initMdcAndUdp, mirroring the G711 approach.

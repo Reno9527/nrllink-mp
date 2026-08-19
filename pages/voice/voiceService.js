@@ -14,6 +14,8 @@ const devModelMap = new Map(devModels.map(model => [Number(model.id), model.name
 const ENABLE_VOICE_PACKET_REORDER = false;
 const VOICE_REORDER_WINDOW = 3;
 const VOICE_REORDER_RESET_MS = 500;
+// Opus 解码链积压上限：解码慢于实时时延迟会单调累积，超过则直接丢包不再入链
+const OPUS_DECODE_BACKLOG_LIMIT = 50;
 
 export class VoiceService {
     constructor(page) {
@@ -28,10 +30,13 @@ export class VoiceService {
         this.reorderStreamId = null;
         this.lastReorderPacketAt = 0;
         this.opusDecodeChain = Promise.resolve();
+        this.opusDecodeBacklog = 0;
         this.opusDecoderSender = null;
         this.opusDecoderSession = 0;
-        this.lastOpusPacketAt = 0;
         this.opusDecodeErrorShown = false;
+        this.disposed = false;
+        // 唯一数据源，setData 只做镜像；基于 page.data 读改写会在 await 后互相覆盖丢日志
+        this.chatLogs = app.globalData.chatLogs || [];
         this.mdcDecoder = null;
         this.mdcDecoderSampleRate = 0;
 
@@ -69,10 +74,11 @@ export class VoiceService {
                 break;
 
             case 2: // Heartbeat
-                this.page.setData({
-                    lastMessageTime: Date.now(),
-                    serverConnected: true
-                });
+                // lastMessageTime 不参与渲染，存普通字段，避免每 2 秒一次无谓 setData
+                this.page.lastMessageTime = Date.now();
+                if (!this.page.data.serverConnected) {
+                    this.page.setData({ serverConnected: true });
+                }
                 break;
 
             case 5: // Text
@@ -83,6 +89,8 @@ export class VoiceService {
 
     dispatchVoicePacket(packet) {
         if (packet.type === 8) {
+            if (this.opusDecodeBacklog >= OPUS_DECODE_BACKLOG_LIMIT) return;
+            this.opusDecodeBacklog++;
             this.opusDecodeChain = this.opusDecodeChain
                 .then(() => this.playOpusVoicePacket(packet))
                 .catch((err) => {
@@ -91,6 +99,9 @@ export class VoiceService {
                         this.opusDecodeErrorShown = true;
                         wx.showToast({ title: '收到 Opus 音频，但当前环境无法解码', icon: 'none' });
                     }
+                })
+                .finally(() => {
+                    this.opusDecodeBacklog--;
                 });
             return;
         }
@@ -115,13 +126,13 @@ export class VoiceService {
     }
 
     async playOpusVoicePacket(packet) {
-        const now = Date.now();
         const sender = `${packet.callSign || ''}-${packet.ssid == null ? '' : packet.ssid}`;
-        if (sender !== this.opusDecoderSender || now - this.lastOpusPacketAt > 1000) {
+        // 仅在发送者变化时重置解码器；按时间间隙重建（free+createDecoder 的
+        // WASM 堆分配）会让 1 秒抖动就丢掉 PLC 连续性
+        if (sender !== this.opusDecoderSender) {
             this.opusDecoderSender = sender;
             this.opusDecoderSession++;
         }
-        this.lastOpusPacketAt = now;
 
         const decoderStreamId = `${sender}-${this.opusDecoderSession}`;
         const linearData = await opus.decodeFrame(packet.data, decoderStreamId);
@@ -314,6 +325,7 @@ export class VoiceService {
      * Controls the growing bubble animation.
      */
     startReceivingAnimation() {
+        if (this.disposed) return;
         if (!this.page.data.isReceivingVoice) return;
 
         let width = this.page.data.receivingBubbleWidth;
@@ -350,9 +362,23 @@ export class VoiceService {
     }
 
     /**
+     * Page hidden/unloaded: clear timers and mute callbacks that would
+     * otherwise keep setData'ing a hidden or dead page.
+     */
+    dispose() {
+        this.disposed = true;
+        if (this.voiceEndTimer) {
+            clearTimeout(this.voiceEndTimer);
+            this.voiceEndTimer = null;
+        }
+        this.stopDurationUpdateTimer();
+    }
+
+    /**
      * Finalizes voice reception, saves the WAV file, and adds to log.
      */
     async finishIncomingVoice() {
+        if (this.disposed) return;
         if (!this.currentReceiving.isReceiving) return;
 
         const bufLen = this.incomingVoiceBuffer.length;
@@ -486,7 +512,8 @@ export class VoiceService {
      * Utility to add a log entry and scroll UI.
      */
     addChatLog(log) {
-        const logs = [...this.page.data.chatLogs, log].slice(-100);
+        const logs = [...this.chatLogs, log].slice(-100);
+        this.chatLogs = logs;
         app.globalData.chatLogs = logs;
         this.page.setData({
             chatLogs: logs,

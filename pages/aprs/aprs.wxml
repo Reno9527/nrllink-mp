@@ -18,7 +18,6 @@
     <web-view 
       id="aprsWebView" 
       src="https://aprs.tv/"
-      bindmessage="handleWebViewMessage"
       bindload="handleWebViewLoad"
       binderror="handleWebViewError"
     ></web-view>

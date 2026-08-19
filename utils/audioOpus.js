@@ -61,7 +61,8 @@ export async function getEncoder() {
             frameSize: OPUS_FRAME_SIZE,
             bitrate: OPUS_BITRATE,
             application: Application.Voip,
-            complexity: 10,
+            // WXWebAssembly 无 SIMD，complexity 10 有超实时预算风险，降到 5
+            complexity: 5,
             signal: Signal.Voice,
             maxBandwidth: Bandwidth.Wideband,
             vbr: true,

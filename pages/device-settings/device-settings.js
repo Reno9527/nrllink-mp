@@ -70,7 +70,8 @@ Page({
     sqlOptions: Array.from({ length: 9 }, (_, i) => i + 1),
     micOptions: Array.from({ length: 9 }, (_, i) => i + 1),
     motoChannelIndex: 0,
-    ctcssIndex: 0,
+    ctcssIndex1wRecive: 0,
+    ctcssIndex1wTransmit: 0,
     relayIndex: 0,
     platformIndex: 0, // 新增平台索引
     current_relay_label: '空模板'
@@ -79,7 +80,15 @@ Page({
   onLoad(options) {
     // 初始化数据
     if (options.device) {
-      const device = JSON.parse(decodeURIComponent(options.device));
+      let device = null;
+      try {
+        device = JSON.parse(decodeURIComponent(options.device));
+      } catch (e) {
+        console.error('设备参数解析失败:', e);
+        wx.showToast({ title: '设备参数错误', icon: 'none' });
+        setTimeout(() => wx.navigateBack(), 800);
+        return;
+      }
       this.setData({
         temp: device
       });
@@ -88,9 +97,9 @@ Page({
 
     // 假设 ctcssOptions 和 relayOptions 从外部获取
     this.setData({
-      ctcssOptions: ctcssOptions || [],
-      relayOptions: this.fetchRelayOptions() // 需要从 API 或本地定义
+      ctcssOptions: ctcssOptions || []
     });
+    this.fetchRelayOptions(); // 异步获取，完成后内部自行 setData
 
     // 新增调用获取平台列表的方法
     this.fetchPlatformList();
@@ -98,12 +107,17 @@ Page({
 
   // 更新选择器索引
   updatePickerIndex() {
+    const parm = this.data.temp.device_parm;
+    const reciveCtcssIndex = ctcssOptions.findIndex(item => item.id === parm.one_recive_cxcss);
+    const transmitCtcssIndex = ctcssOptions.findIndex(item => item.id === parm.one_transmit_cxcss);
+    const platformIndex = this.data.platformOptions.findIndex(item => item.ipaddr === parm.dest_domainname);
     this.setData({
-      motoChannelIndex: this.data.temp.device_parm.moto_channel,
-      ctcssIndex: ctcssOptions.findIndex(item => item.id === this.data.temp.device_parm.one_recive_cxcss),
-      one_recive_cxcss: ctcssOptions.find(item => item.id === this.data.temp.device_parm.one_recive_cxcss)?.name,
-      one_transmit_cxcss: ctcssOptions.find(item => item.id === this.data.temp.device_parm.one_transmit_cxcss)?.name,
-      platformIndex: this.data.platformOptions.findIndex(item => item.ipaddr === this.data.temp.device_parm.dest_domainname) || 0
+      motoChannelIndex: parm.moto_channel,
+      ctcssIndex1wRecive: reciveCtcssIndex < 0 ? 0 : reciveCtcssIndex,
+      ctcssIndex1wTransmit: transmitCtcssIndex < 0 ? 0 : transmitCtcssIndex,
+      one_recive_cxcss: ctcssOptions.find(item => item.id === parm.one_recive_cxcss)?.name,
+      one_transmit_cxcss: ctcssOptions.find(item => item.id === parm.one_transmit_cxcss)?.name,
+      platformIndex: platformIndex < 0 ? 0 : platformIndex
     });
   },
 
@@ -172,12 +186,14 @@ Page({
   updateCtcss(e) {
 
     const field = e.currentTarget.dataset.field;
-    const value = this.data.ctcssOptions[e.detail.value].id;
+    const index = Number(e.detail.value);
+    const value = this.data.ctcssOptions[index].id;
+    const indexField = field === 'one_recive_cxcss' ? 'ctcssIndex1wRecive' : 'ctcssIndex1wTransmit';
 
     this.setData({
       [`temp.device_parm.${field}`]: value,
-      ctcssIndex: e.detail.value,
-      [field]: this.data.ctcssOptions[e.detail.value].name
+      [indexField]: index,
+      [field]: this.data.ctcssOptions[index].name
     });
   },
 
@@ -244,7 +260,12 @@ Page({
         '&dest_domainname=' +
         dest_domainname
     ).then((response) => {
+      // 业务失败（如 20001）时拦截器已 toast 错误，这里直接返回
+      if (response === undefined) return;
       wx.showToast({ title: response.message || '保存成功', icon: 'success' });
+    }).catch((err) => {
+      console.error('保存IP设置失败:', err);
+      wx.showToast({ title: '保存失败，请检查网络', icon: 'none' });
     });
   },
 
@@ -263,14 +284,24 @@ Page({
         '=' +
         value
     ).then((response) => {
+      // 业务失败（如 20001）时拦截器已 toast 错误，这里直接返回
+      if (response === undefined) return;
       wx.showToast({ title: response.message || '保存成功', icon: 'success' });
+    }).catch((err) => {
+      console.error('保存参数失败:', err);
+      wx.showToast({ title: '保存失败，请检查网络', icon: 'none' });
     });
   },
 
   // 保存 1W 参数
   update1w() {
     changeDevice1w(this.data.temp.device_parm).then((response) => {
+      // 业务失败（如 20001）时拦截器已 toast 错误，这里直接返回
+      if (response === undefined) return;
       wx.showToast({ title: response.message || '1w参数保存成功', icon: 'success' });
+    }).catch((err) => {
+      console.error('保存1w参数失败:', err);
+      wx.showToast({ title: '保存失败，请检查网络', icon: 'none' });
     });
   },
 
@@ -295,9 +326,12 @@ Page({
   // 获取平台列表
   fetchPlatformList() {
     getplatformList().then((response) => {
+      // 业务失败（20001）时拦截器已提示，response 为 undefined
+      if (response === undefined) return;
+      const platformIndex = response.items.findIndex(item => item.ipaddr === this.data.temp.device_parm.dest_domainname);
       this.setData({
         platformOptions: response.items,
-        platformIndex: response.items.findIndex(item => item.ipaddr === this.data.temp.device_parm.dest_domainname) || 0
+        platformIndex: platformIndex < 0 ? 0 : platformIndex
       });
       this.updatePickerIndex();
     }).catch((error) => {

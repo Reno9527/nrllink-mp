@@ -101,10 +101,30 @@ Page({
   onLoad() {
     this._onCharChange = this._onCharChange.bind(this);
     this._onConnState = this._onConnState.bind(this);
+    this._onDeviceFound = this._onDeviceFound.bind(this);
+    // 设备发现回调统一入口（回调内用 scanning 门控），_teardown 里 off；
+    // startScan 会 off-then-on 保证恰好注册一次，避免扫描多次后回调叠加、
+    // 页面销毁后仍对死页面 setData。
+    wx.onBluetoothDeviceFound(this._onDeviceFound);
   },
 
   onUnload() {
     this._teardown();
+  },
+
+  _onDeviceFound(res) {
+    if (!this.data.scanning) return;
+    const updates = {};
+    (res.devices || []).forEach((d) => {
+      const name = d.name || d.localName || '';
+      if (name.indexOf(TARGET_NAME) === -1) return;
+      const list = this.data.devices.slice();
+      if (!list.find((x) => x.deviceId === d.deviceId)) {
+        list.push({ deviceId: d.deviceId, name, RSSI: d.RSSI });
+        updates.devices = list;
+      }
+    });
+    if (updates.devices) this.setData(updates);
   },
 
   // ---- 扫描 --------------------------------------------------------------
@@ -119,19 +139,9 @@ Page({
       return;
     }
 
-    wx.onBluetoothDeviceFound((res) => {
-      const updates = {};
-      (res.devices || []).forEach((d) => {
-        const name = d.name || d.localName || '';
-        if (name.indexOf(TARGET_NAME) === -1) return;
-        const list = this.data.devices.slice();
-        if (!list.find((x) => x.deviceId === d.deviceId)) {
-          list.push({ deviceId: d.deviceId, name, RSSI: d.RSSI });
-          updates.devices = list;
-        }
-      });
-      if (updates.devices) this.setData(updates);
-    });
+    // 断开过连接时 _teardown 已 off 该监听，这里先 off 再 on 保证恰好注册一次
+    try { wx.offBluetoothDeviceFound(this._onDeviceFound); } catch (e) {}
+    wx.onBluetoothDeviceFound(this._onDeviceFound);
 
     try {
       await this._wx('startBluetoothDevicesDiscovery', {
@@ -541,6 +551,7 @@ Page({
     this._rejectAllWaiters('断开');
     try { wx.offBLECharacteristicValueChange(this._onCharChange); } catch (e) {}
     try { wx.offBLEConnectionStateChange(this._onConnState); } catch (e) {}
+    try { wx.offBluetoothDeviceFound(this._onDeviceFound); } catch (e) {}
     if (this._deviceId) {
       try { await this._wx('closeBLEConnection', { deviceId: this._deviceId }); } catch (e) {}
     }

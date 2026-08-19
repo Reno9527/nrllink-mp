@@ -32,6 +32,18 @@
   <image src="{{license}}" mode="aspectFit" class="preview-image"></image>
 </view>
 
+    <view class="agreement-row">
+      <checkbox-group bindchange="onAgreementChange">
+        <label class="agreement-label">
+          <checkbox value="agree" checked="{{agreedPolicies}}" color="#07c160" />
+          <text class="agreement-text">我已阅读并同意</text>
+        </label>
+      </checkbox-group>
+      <text class="agreement-link" bindtap="openUserAgreement">《用户服务协议》</text>
+      <text class="agreement-text">和</text>
+      <text class="agreement-link" bindtap="openPrivacyPolicy">《隐私政策》</text>
+    </view>
+
     <button formType="submit" class="button">注册</button>
   </form>
 </view>

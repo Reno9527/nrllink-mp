@@ -246,9 +246,9 @@
     </view>
     <view class="ptt-bar">
       <view class="status-indicator {{serverConnected ? 'connected' : 'disconnected'}}"></view>
-      <button class="ptt-btn {{isTalking ? 'active' : ''}}" bindtap="toggleTalk">
+      <button class="ptt-btn {{isTalking ? 'active' : ''}}" bindtap="toggleTalk" bindlongpress="onPttLongPress" bindtouchend="onPttTouchEnd" bindtouchcancel="onPttTouchEnd">
         <view class="ptt-icon"></view>
-        <text>{{isTalking ? '正在发射 TX...' : '点击发言'}}</text>
+        <text>{{isTalking ? '正在发射 TX...' : '点击或长按发言'}}</text>
       </button>
     </view>
   </view>

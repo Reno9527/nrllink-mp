@@ -3,6 +3,8 @@ import * as audio from './utils/audioPlayer';
 
 // /group/get 结果缓存时长，避免多个页面/定时器高频重复请求同一群组
 const GROUP_GET_CACHE_MS = 15000;
+// /device/qths 结果缓存时长，避免每条语音/文本都全量拉一次
+const QTH_GET_CACHE_MS = 15000;
 
 import {
   getGroupList as _getGroupList,
@@ -35,8 +37,6 @@ App({
     availableDevices: {},
     voicePage: null,
     configPage: null,
-    configPageReady: false,
-    configPageReadyCallback: null,
     udpClient: null,
     messagePage: null,
     serverConfig: {
@@ -146,21 +146,31 @@ App({
 
     getQTH: async function (silent = false) {
 
-      try {
+      if (!this.qthCache) this.qthCache = { fetchedAt: 0, data: undefined, promise: null };
+      const cached = this.qthCache;
 
-        const data = await _getQTH(undefined, silent);
+      // 合并进行中的相同请求，避免并发重复调用
+      if (cached.promise) return cached.promise;
+      if (cached.data !== undefined && Date.now() - cached.fetchedAt < QTH_GET_CACHE_MS) return cached.data;
 
-        return data
+      const promise = _getQTH(undefined, silent)
+        .then((data) => {
+          this.qthCache = { fetchedAt: Date.now(), data, promise: null };
+          return data;
+        })
+        .catch((error) => {
+          this.qthCache = { fetchedAt: 0, data: undefined, promise: null };
+          if (!silent) {
+            wx.showToast({
+              title: error.message || '获取设备QTH失败',
+              icon: 'none'
+            });
+          }
+          return undefined;
+        });
 
-      } catch (error) {
-        if (!silent) {
-          wx.showToast({
-            title: error.message || '获取设备QTH失败',
-            icon: 'none'
-          });
-        }
-      }
-
+      this.qthCache.promise = promise;
+      return promise;
     },
 
 
@@ -185,8 +195,19 @@ App({
 
     async logout() {
 
-      this.udpClient.close();
-      this.udpClient = null;
+      if (this.heartbeatTimer) {
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = null;
+      }
+
+      if (this.udpClient) {
+        try {
+          this.udpClient.close();
+        } catch (error) {
+          console.error('关闭 UDP 连接失败:', error);
+        }
+        this.udpClient = null;
+      }
       audio.suspend();
 
       try {
@@ -202,8 +223,23 @@ App({
         });
       }
 
-
+      // 重置会话字段，避免同设备换账号串数据
+      this.userInfo = null;
       this.token = null;
+      this.dmrid = null;
+      this.passcode = null;
+      this.currentGroup = null;
+      this.currentDevice = null;
+      this.callHistory = [];
+      this.chatLogs = [];
+      this.lastHeartbeatSentAt = 0;
+      this.availableGroups = null;
+      this.availableDevices = {};
+      this.groupCache = {};
+      this.qthCache = null;
+      this.voicePage = null;
+      this.configPage = null;
+      this.messagePage = null;
 
       wx.removeStorageSync('token');
       wx.removeStorageSync('userInfo');
@@ -287,17 +323,6 @@ App({
       hour12: false
     }).replace(/\//g, '-');
   },
-
-  setToken(token) {
-    wx.setStorageSync('token', token);
-    this.globalData.token = token;
-  },
-
-  clearToken() {
-    wx.removeStorageSync('token');
-    this.token = null;
-  },
-
 
   registerPage(page) {
     const route = page.__route__ || page.route;

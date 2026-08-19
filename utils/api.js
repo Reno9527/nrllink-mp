@@ -38,7 +38,7 @@ const responseInterceptor = (response) => {
   }
 
   // 其他状态码需要跳转登录页
-  app().globalData.token = null;
+  getApp().globalData.token = null;
   wx.removeStorageSync('token');
   wx.removeStorageSync('userInfo');
 
@@ -49,7 +49,10 @@ const responseInterceptor = (response) => {
   wx.reLaunch({
     url: '/pages/login/login'
   });
-  throw new Error('登录已过期');
+  // 业务确定性错误，打标记让重试循环直接抛出
+  const error = new Error('登录已过期');
+  error.noRetry = true;
+  throw error;
 
 };
 
@@ -79,53 +82,39 @@ const request = async (options, retries = 3, timeout = 10000) => {
     });
   }
 
-
-  // 检查网络状态
-  const checkNetwork = () => new Promise((resolve, reject) => {
-    wx.getNetworkType({
-      success: (res) => {
-        if (res.networkType === 'none') {
-          reject(new Error('网络不可用，请检查网络连接'));
-        } else {
-          resolve();
-        }
-      },
-      fail: () => reject(new Error('网络状态检查失败'))
-    });
-  });
-
-  for (let i = 0; i < retries; i++) {
-    try {
-      await checkNetwork();
-
-      const result = await new Promise((resolve, reject) => {
-        wx.request({
-          ...config,
-          success: (res) => {
-            try {
-              const data = responseInterceptor(res);
-              if (!options.silent) wx.hideLoading();
-              resolve(data);
-            } catch (error) {
-              reject(error);
-            }
-          },
-          fail: (error) => {
-            if (!options.silent) wx.hideLoading();
-            reject(error);
-          }
+  try {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const result = await new Promise((resolve, reject) => {
+          wx.request({
+            ...config,
+            success: (res) => {
+              try {
+                const data = responseInterceptor(res);
+                resolve(data);
+              } catch (error) {
+                reject(error);
+              }
+            },
+            fail: reject
+          });
         });
-      });
 
-      return result;
-    } catch (error) {
-      if (i === retries - 1) {
-        throw error;
+        return result;
+      } catch (error) {
+        // token 过期等业务确定性错误不重试
+        if (error && error.noRetry) throw error;
+
+        if (i === retries - 1) {
+          throw error;
+        }
+
+        // 等待一段时间后重试
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
       }
-
-      // 等待一段时间后重试
-      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
     }
+  } finally {
+    if (!options.silent) wx.hideLoading();
   }
 };
 

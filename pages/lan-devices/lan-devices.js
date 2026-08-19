@@ -91,11 +91,16 @@ Page({
       progressPercent: 0, statusText: '正在兼容扫描旧固件…',
     });
     this._scan = discovery.scanSubnet(subnet, {
-      onProgress: (done, total) => this.setData({
-        progressDone: done,
-        progressTotal: total,
-        progressPercent: Math.round((done * 100) / total),
-      }),
+      onProgress: (done, total) => {
+        // 254 次探测每次都会回调，只在整数百分比变化时 setData，减轻渲染压力
+        const percent = Math.round((done * 100) / total);
+        if (percent === this.data.progressPercent) return;
+        this.setData({
+          progressDone: done,
+          progressTotal: total,
+          progressPercent: percent,
+        });
+      },
       onFound: (device) => {
         found.push(device);
         this.setData({ devices: discovery.mergeDevices([device]) });

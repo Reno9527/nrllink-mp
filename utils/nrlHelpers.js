@@ -20,13 +20,16 @@ function decodeUint8ArrayToText(data) {
             const byte1 = uint8Array[i++];
             if (byte1 < 0x80) text += String.fromCharCode(byte1);
             else if (byte1 >= 0xC0 && byte1 < 0xE0) {
+                if (i >= uint8Array.length) break; // 截断的多字节序列
                 const byte2 = uint8Array[i++];
                 text += String.fromCharCode(((byte1 & 0x1F) << 6) | (byte2 & 0x3F));
             } else if (byte1 >= 0xE0 && byte1 < 0xF0) {
+                if (i + 1 >= uint8Array.length) break;
                 const byte2 = uint8Array[i++];
                 const byte3 = uint8Array[i++];
                 text += String.fromCharCode(((byte1 & 0x0F) << 12) | ((byte2 & 0x3F) << 6) | (byte3 & 0x3F));
             } else if (byte1 >= 0xF0) {
+                if (i + 2 >= uint8Array.length) break;
                 const byte2 = uint8Array[i++];
                 const byte3 = uint8Array[i++];
                 const byte4 = uint8Array[i++];

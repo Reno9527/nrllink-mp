@@ -11,9 +11,7 @@ Page({
   onLoad() {
     const app = getApp();
     app.registerPage(this);
-
-
-    this.refreshData();
+    // 数据加载交给 onShow（首次进入也会触发），避免连续两个相同请求
   },
 
   onShow() {
@@ -25,7 +23,7 @@ Page({
     const app = getApp();
 
     //await app.globalData.getGroupList()
-    const groups = await app.globalData.getGroupList();
+    const groups = (await app.globalData.getGroupList()) || []; // 失败时 resolve undefined，兜底空数组
 
           // 按在线状态排序，在线设备在前
           groups.sort((a, b) => {
@@ -61,7 +59,7 @@ Page({
   async onPullDownRefresh() {
     try {
       // 下拉刷新
-      this.refreshData();
+      await this.refreshData();
 
       console.log('Pull-down refresh completed successfully.');
     } catch (error) {
