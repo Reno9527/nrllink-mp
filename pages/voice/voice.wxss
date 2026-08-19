@@ -615,25 +615,40 @@
   color: #52606d;
 }
 
-.codec-control-title {
-  font-size: 24rpx;
+.codec-segment {
+  flex: 1;
+  display: flex;
+  padding: 4rpx;
+  background: #e8ecef;
+  border-radius: 14rpx;
 }
 
-.codec-control-value {
+.codec-option {
   flex: 1;
-  margin-left: 14rpx;
-  font-size: 22rpx;
+  padding: 10rpx 0;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+  text-align: center;
+  color: #7b8794;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.codec-option.active {
+  background: #ffffff;
   font-weight: 700;
+  box-shadow: 0 2rpx 6rpx rgba(15, 23, 42, 0.12);
+}
+
+.codec-option.g711.active {
   color: #058c40;
 }
 
-.codec-control.codec-opus .codec-control-value {
+.codec-option.opus.active {
   color: #4f46e5;
 }
 
-.codec-control switch {
-  transform: scale(0.78);
-  transform-origin: right center;
+.codec-control.disabled .codec-segment {
+  opacity: 0.45;
 }
 
 .ptt-bar {

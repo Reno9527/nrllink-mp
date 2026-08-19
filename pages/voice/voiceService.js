@@ -275,8 +275,8 @@ export class VoiceService {
         // therefore cannot be used to infer frame duration.
         this.accumulatedDuration += linearData.length * 1000 / sampleRate;
 
-        // Only update lastVoiceTime, duration is updated by timer
-        this.page.setData({ lastVoiceTime: now });
+        // lastVoiceTime is never rendered; a per-packet setData (50/s) would
+        // stall the iOS main thread and starve audio scheduling.
 
         // Reset silence timer
         if (this.voiceEndTimer) clearTimeout(this.voiceEndTimer);
@@ -319,12 +319,10 @@ export class VoiceService {
         let width = this.page.data.receivingBubbleWidth;
         if (width < 40) width += 2;
         else if (width < 66) width += 0.5;
+        else return; // Bubble at max size; stop the 200ms setData loop.
 
         this.page.setData({ receivingBubbleWidth: width });
-
-        if (this.page.data.isReceivingVoice) {
-            setTimeout(() => this.startReceivingAnimation(), 200);
-        }
+        setTimeout(() => this.startReceivingAnimation(), 200);
     }
 
     /**

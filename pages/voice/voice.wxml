@@ -238,10 +238,11 @@
         <text class="iconfont icon-send">发送</text>
       </view>
     </view>
-    <view class="codec-control codec-{{codec}}">
-      <text class="codec-control-title">发送编码</text>
-      <text class="codec-control-value">{{codec === 'opus' ? 'Opus 16 kHz' : 'G.711 8 kHz'}}</text>
-      <switch checked="{{codec === 'opus'}}" disabled="{{isTalking}}" bindchange="onCodecSwitch" color="#6366f1" />
+    <view class="codec-control {{isTalking ? 'disabled' : ''}}">
+      <view class="codec-segment">
+        <view class="codec-option g711 {{codec === 'g711' ? 'active' : ''}}" bindtap="onCodecSelect" data-codec="g711">G.711 · 8k</view>
+        <view class="codec-option opus {{codec === 'opus' ? 'active' : ''}}" bindtap="onCodecSelect" data-codec="opus">Opus · 16k</view>
+      </view>
     </view>
     <view class="ptt-bar">
       <view class="status-indicator {{serverConnected ? 'connected' : 'disconnected'}}"></view>

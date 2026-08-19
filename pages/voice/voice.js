@@ -353,10 +353,11 @@ Page({
   },
 
   // Event Handlers
-  onCodecSwitch(e) {
+  onCodecSelect(e) {
     if (this.data.isTalking) return;
 
-    const codec = e.detail.value ? 'opus' : 'g711';
+    const codec = e.currentTarget.dataset.codec === 'opus' ? 'opus' : 'g711';
+    if (codec === this.data.codec) return;
     this.setData({ codec });
     wx.setStorageSync('voiceSendCodec', codec);
   },
