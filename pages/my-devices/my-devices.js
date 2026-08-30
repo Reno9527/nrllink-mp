@@ -17,6 +17,7 @@ Page({
     devices: [],
     loaded: false,
     loadError: false,
+    needLogin: false, // 当前服务器无管理登录态（设备列表接口要求登录）
     groups: [],
     showGroupPicker: false,
     currentGroupId: 0,
@@ -31,6 +32,12 @@ Page({
   },
 
   async loadDevices() {
+    // 未登录当前服务器时设备管理接口必然失败（50008），直接进未登录态，不发请求
+    if (!wx.getStorageSync('token')) {
+      this.setData({ devices: [], loaded: true, loadError: false, needLogin: true });
+      return;
+    }
+
     // 先拿群组列表（用于显示每台设备的当前群组）
     let groups = this.data.groups;
     try {
@@ -48,7 +55,7 @@ Page({
       // 注意：code 20001 时请求封装会返回 undefined，此时保留旧列表，不清空
       if (!res || !res.items) {
         console.warn('loadDevices: 接口未返回设备列表', res);
-        this.setData({ loaded: true, groups, loadError: false });
+        this.setData({ loaded: true, groups, loadError: false, needLogin: false });
         return;
       }
       const items = res.items;
@@ -64,12 +71,22 @@ Page({
       });
       // 在线的排前面
       list.sort((a, b) => (b.is_online ? 1 : 0) - (a.is_online ? 1 : 0));
-      this.setData({ devices: list, loaded: true, groups, loadError: false });
+      this.setData({ devices: list, loaded: true, groups, loadError: false, needLogin: false });
     } catch (e) {
       console.error('loadDevices: 获取设备列表失败', e);
-      this.setData({ loaded: true, groups, loadError: true });
-      wx.showToast({ title: '加载设备列表失败，点击页面重试', icon: 'none' });
+      // token 失效（50008）时拦截器已清除登录态，按未登录展示而不是"加载失败"
+      const authFailed = (e && e.authError) || !wx.getStorageSync('token');
+      this.setData({ loaded: true, groups, loadError: !authFailed, needLogin: authFailed });
+      if (!authFailed) {
+        wx.showToast({ title: '加载设备列表失败，点击页面重试', icon: 'none' });
+      }
     }
+  },
+
+  // 登录弹窗在通话页（登录态按服务器隔离）：设标记切过去自动弹出该服务器的登录框
+  goLogin() {
+    getApp().globalData.pendingServerLogin = true;
+    wx.switchTab({ url: '/pages/voice/voice' });
   },
 
   groupName(groupId) {

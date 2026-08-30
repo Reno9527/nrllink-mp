@@ -1,6 +1,13 @@
 <view class="page-container">
+  <!-- 未登录当前服务器：群组管理需要登录态 -->
+  <view class="empty" wx:if="{{needLogin}}">
+    <text class="empty-text">未登录当前服务器</text>
+    <text class="empty-tip">停留在当前房间通话不受影响；切换房间、管理设备需要登录</text>
+    <button class="empty-login-btn" bindtap="goLogin">去登录</button>
+  </view>
+
   <!-- 群组选择卡片 -->
-  <view class="card">
+  <view class="card" wx:if="{{!needLogin}}">
     <view class="card-title">选择群组</view>
     <view class="group-list">
       <view

@@ -947,7 +947,7 @@
 
 /* Server Card List */
 .server-scroll-list {
-  max-height: 220rpx;
+  max-height: calc(60vh - 280rpx);
   margin-top: 8rpx;
 }
 
@@ -1040,83 +1040,35 @@
   font-family: monospace;
 }
 
-/* Group Card List */
-.group-scroll-list {
-  max-height: 500rpx;
-  padding: 10rpx 0 35rpx 0;
+/* 未登录徽标（语音通联不依赖登录态，仅提示管理功能不可用） */
+.auth-badge {
+  font-size: 20rpx;
+  color: #fa8c16;
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-top: 6rpx;
 }
 
-.group-card {
-  padding: 24rpx 35rpx;
-  border-bottom: 1rpx solid #f0f0f0;
-  transition: all 0.2s;
+/* 服务器卡片上的已登录标记 */
+.server-card-auth {
+  font-size: 20rpx;
+  color: #07c160;
+  background: #f0fdf4;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 12rpx;
 }
 
-.group-card:last-child {
-  border-bottom: none;
-}
-
-.group-card:active {
-  background: #f8f9fa;
-}
-
-.group-card.selected {
-  background: #e8f5e9;
-}
-
-.group-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.group-card-name {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #333;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-right: 20rpx;
-}
-
-.group-card-stats {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  min-width: 96rpx;
-  margin-right: 18rpx;
-  flex-shrink: 0;
-  font-weight: 700;
-}
-
-.group-card-online {
-  font-size: 27rpx;
-  color: #2ecc71;
-}
-
-.group-card-separator {
-  font-size: 24rpx;
-  color: #95a5a6;
-  margin: 0 4rpx;
-}
-
-.group-card-total {
-  font-size: 27rpx;
-  color: #7f8c8d;
-}
-
-.group-card-check {
-  font-size: 32rpx;
-  color: #06a94d;
-  font-weight: bold;
-  width: 32rpx;
-  flex-shrink: 0;
-  text-align: right;
-}
-
-.group-card-check.placeholder {
-  visibility: hidden;
+/* OIDC 登录按钮（服务器开启 OIDC 时显示） */
+.oidc-login-btn {
+  width: 100%;
+  margin-top: 20rpx;
+  background: #fff;
+  color: #07c160;
+  border: 2rpx solid #07c160;
+  border-radius: 12rpx;
+  font-size: 30rpx;
+  line-height: 80rpx;
 }

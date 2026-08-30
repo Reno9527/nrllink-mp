@@ -8,7 +8,7 @@
         <button class="avatar-wrapper" open-type="chooseAvatar" bind:chooseavatar="onChooseAvatar">
           <image class="avatar" src="{{userInfo.avatar}}" mode="aspectFill"></image>
         </button>
-        <view class="user-text">
+        <view class="user-text" bindtap="openMonitor">
           <text class="user-callsign">{{userInfo.callsign}}-100</text>
           <view class="user-tags">
             <view class="tag">DMR:{{userInfo.dmrid}}</view>
@@ -25,12 +25,13 @@
             <text class="server-addr">{{serverConfig.host}}</text>
           </view>
         </view>
+        <text class="auth-badge" wx:if="{{!serverAuthed}}" bindtap="showServerLoginModal">未登录 · 点击登录</text>
       </view>
     </view>
     <!-- Second Row: Group Information -->
     <view class="group-row">
-      <!-- Left: Group Name (Clickable to switch) -->
-      <view class="group-name-section clickable" bindtap="showGroupModal">
+      <!-- Left: Group Name (Clickable to open monitor/group page) -->
+      <view class="group-name-section clickable" bindtap="openMonitor">
         <text class="group-name-text">{{currentGroup || 'STANDBY'}}</text>
         <text class="group-switch-hint">▾</text>
       </view>
@@ -153,34 +154,6 @@
       </view>
     </view>
   </view>
-  <!-- Group Switch Modal -->
-  <view class="modal-overlay {{showGroupModal ? 'show' : ''}}" bindtap="hideGroupModal" wx:if="{{showGroupModal}}">
-    <view class="modal-container" catchtap="stopPropagation">
-      <view class="modal-header">
-        <text class="modal-title">选择群组</text>
-        <view class="modal-close" bindtap="hideGroupModal">✕</view>
-      </view>
-      <scroll-view class="group-scroll-list" scroll-y>
-        <view
-          class="group-card {{item.id === currentGroupId ? 'selected' : ''}}"
-          wx:for="{{availableGroupsForPicker}}"
-          wx:key="id"
-          bindtap="onGroupCardSelect"
-          data-index="{{index}}"
-        >
-          <view class="group-card-header">
-            <text class="group-card-name">{{item.displayGroupName}}</text>
-            <view class="group-card-stats">
-              <text class="group-card-online">{{item.online_dev_number || 0}}</text>
-              <text class="group-card-separator">/</text>
-              <text class="group-card-total">{{item.total_dev_number || 0}}</text>
-            </view>
-            <text class="group-card-check {{item.id === currentGroupId ? '' : 'placeholder'}}">✓</text>
-          </view>
-        </view>
-      </scroll-view>
-    </view>
-  </view>
 
   <!-- Server Switch Modal -->
   <view class="modal-overlay {{showServerModal ? 'show' : ''}}" bindtap="hideServerModal" wx:if="{{showServerModal}}">
@@ -204,6 +177,7 @@
             >
               <view class="server-card-header">
                 <text class="server-card-name">{{item.name}}</text>
+                <text class="server-card-auth" wx:if="{{authedHosts[item.host]}}">已登录</text>
                 <view class="server-card-stats">
                   <text class="server-card-online">{{item.online || 0}}</text>
                   <text class="server-card-separator">/</text>
@@ -215,6 +189,20 @@
             </view>
           </scroll-view>
         </view>
+        <!-- Switch Button -->
+        <button class="switch-server-btn" bindtap="confirmServerSwitch">切换</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- Server Login Modal（管理功能需要登录态时弹出） -->
+  <view class="modal-overlay {{showLoginModal ? 'show' : ''}}" bindtap="hideLoginModal" wx:if="{{showLoginModal}}">
+    <view class="modal-container server-modal" catchtap="stopPropagation">
+      <view class="modal-header">
+        <text class="modal-title">登录 {{serverConfig.name}}</text>
+        <view class="modal-close" bindtap="hideLoginModal">✕</view>
+      </view>
+      <view class="modal-body">
         <!-- Username Input -->
         <view class="form-item">
           <text class="form-label">用户名</text>
@@ -225,8 +213,10 @@
           <text class="form-label">密码</text>
           <input class="form-input" type="password" placeholder="请输入密码" bindinput="onServerPasswordInput" value="{{tempPassword}}" />
         </view>
-        <!-- Switch Button -->
-        <button class="switch-server-btn" bindtap="confirmServerSwitch">切换服务器</button>
+        <!-- Login Button -->
+        <button class="switch-server-btn" bindtap="doServerLogin">登录</button>
+        <!-- OIDC Login Button（服务器开启 OIDC 时显示） -->
+        <button class="oidc-login-btn" wx:if="{{oidcConfig.enabled}}" bindtap="oidcServerLogin">{{oidcConfig.button_name || 'OIDC 登录'}}</button>
       </view>
     </view>
   </view>

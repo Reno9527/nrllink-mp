@@ -1,0 +1,34 @@
+<view class="container">
+  <view class="topbar">
+    <view class="topbar-left">
+      <view class="conn-dot {{connected ? 'on' : 'off'}}"></view>
+      <text class="server-name">{{serverName}}</text>
+    </view>
+    <text class="stats">在线 {{stats.online_devices}} · 收听 {{stats.total_subs}} · 连接 {{stats.connected_clients}}</text>
+  </view>
+
+  <view class="auth-tip" wx:if="{{!serverAuthed}}">未登录当前服务器：可收听全部公共房间，加入群组需先登录</view>
+
+  <view class="empty-hint" wx:if="{{rooms.length === 0}}">{{connected ? '暂无房间' : '正在连接服务器...'}}</view>
+
+  <view class="room-grid {{gridClass}}">
+    <view
+      wx:for="{{rooms}}"
+      wx:key="room_key"
+      class="room-box rt-{{item.room_type}} {{item.active ? 'speaking' : ''}} {{subscribedKeys[item.room_key] ? 'subscribed' : ''}} {{item.isCurrent ? 'current' : ''}}"
+    >
+      <view class="room-head">
+        <text class="room-name">#{{item.room_id}} {{item.room_name}}</text>
+      </view>
+      <view class="room-meta">
+        <text class="room-type">{{item.typeName}}</text>
+        <text class="room-state {{item.active ? 'on' : ''}}">在线 {{item.online}} · {{item.active ? item.speakersText : '空闲'}}</text>
+      </view>
+      <view class="room-foot">
+        <view class="listen-btn {{subscribedKeys[item.room_key] ? 'on' : ''}}" catchtap="toggleRoom" data-key="{{item.room_key}}">{{subscribedKeys[item.room_key] ? '收听中' : '收听'}}</view>
+        <view class="current-tag" wx:if="{{item.isCurrent}}">当前群组</view>
+        <view class="join-btn {{serverAuthed ? '' : 'disabled'}}" wx:else catchtap="joinGroup" data-key="{{item.room_key}}">加入</view>
+      </view>
+    </view>
+  </view>
+</view>

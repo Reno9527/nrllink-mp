@@ -245,6 +245,7 @@ App({
       wx.removeStorageSync('userInfo');
       wx.removeStorageSync('dmrid');
       wx.removeStorageSync('passcode');
+      wx.removeStorageSync('serverTokens'); // 各服务器缓存的登录态一并清除
       //wx.removeStorageSync('serverCredentials');
       // wx.restartMiniProgram({    
       //   path: '/pages/login/login',

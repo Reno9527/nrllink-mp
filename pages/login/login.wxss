@@ -77,6 +77,18 @@
   font-size: 16px;
 }
 
+.oidc-btn {
+  width: 100%;
+  height: 40px;
+  line-height: 40px;
+  margin-top: 12px;
+  background-color: #fff;
+  color: #07c160;
+  border: 1px solid #07c160;
+  border-radius: 4px;
+  font-size: 16px;
+}
+
 .agreement-row {
   display: flex;
   align-items: center;

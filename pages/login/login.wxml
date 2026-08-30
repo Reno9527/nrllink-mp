@@ -51,6 +51,7 @@
       </view>
 
       <button bindtap="login" class="login-btn" hover-class="btn-hover">登录</button>
+      <button wx:if="{{oidcConfig.enabled}}" bindtap="oidcLogin" class="oidc-btn" hover-class="btn-hover">{{oidcConfig.button_name || 'OIDC 登录'}}</button>
       <navigator url="/pages/register/register?name={{serverList[serverIndex].name}}&host={{serverList[serverIndex].host}}" class="register-link">
         没有账号？点击注册
       </navigator>

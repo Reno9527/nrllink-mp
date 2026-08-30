@@ -8,7 +8,7 @@ import * as nrlHelpers from '../../utils/nrlHelpers';
 import { VoiceService } from './voiceService';
 import { RecorderService } from './recorderService';
 
-const { updateAvatar, updateDevice } = require('../../utils/api');
+const { updateAvatar } = require('../../utils/api');
 const app = getApp();
 const HEARTBEAT_INTERVAL_MS = 2000;
 const HEARTBEAT_STALE_MS = HEARTBEAT_INTERVAL_MS * 2 + 1000;
@@ -37,7 +37,6 @@ Page({
     scrollIntoView: '',
     isReceivingVoice: false,
     receivingBubbleWidth: 0,
-    availableGroupsForPicker: [],
     currentPlayingId: null,
     isVoicePlaying: false,
     showOnlineModal: false,
@@ -49,10 +48,12 @@ Page({
     tempServerIndex: 0,
     tempUsername: '',
     tempPassword: '',
+    serverAuthed: false, // 当前服务器是否有管理登录态（语音通联不依赖它）
+    authedHosts: {}, // 各服务器 token 缓存，用于服务器卡片上的"已登录"标记
 
-    // Group Switch Data
-    showGroupModal: false,
-    currentGroupId: null
+    // Server Login Data（管理功能需要时弹出的登录框）
+    showLoginModal: false,
+    oidcConfig: { enabled: false, button_name: '' }, // 当前服务器的 OIDC 配置
   },
 
   async onLoad() {
@@ -65,6 +66,7 @@ Page({
       userInfo: app.globalData.userInfo,
       chatLogs: app.globalData.chatLogs,
       serverConfig: app.globalData.serverConfig,
+      serverAuthed: !!wx.getStorageSync('token'),
       startTime: Date.now(),
       codec: savedCodec === 'opus' ? 'opus' : 'g711'
     });
@@ -77,7 +79,6 @@ Page({
 
     // Start background tasks
     this.connectionCheckTimer = setInterval(() => this.checkConnection(), 2000);
-    this.loadAvailableGroups();
     this.loadServerList();
   },
 
@@ -88,25 +89,30 @@ Page({
     try {
       const mdcId = parseInt(app.globalData.userInfo.mdcid, 16);
 
-      // G711 MDC: 8000 Hz samples → A-law encode
-      this.mdcEncoder = new mdc.MDC1200Encoder(8000);
-      this.mdcEncoder.setPreamble(10);
-      this.mdcEncoder.setPacket(0x01, 0x00, mdcId);
-      const samples8k = this.mdcEncoder.getSamples();
-      app.globalData.mdcPacket = g711.MDC2g711Encode(samples8k);
+      // MDC 内容只取决于 mdcid：同一账号重复重建语音会话（切服务器、断线恢复等）
+      // 时沿用已编码结果，只有换了账号（mdcid 变化）才重新编码
+      if (app.globalData.mdcEncodedMdcId !== mdcId || !app.globalData.mdcPacket) {
+        // G711 MDC: 8000 Hz samples → A-law encode
+        this.mdcEncoder = new mdc.MDC1200Encoder(8000);
+        this.mdcEncoder.setPreamble(10);
+        this.mdcEncoder.setPacket(0x01, 0x00, mdcId);
+        const samples8k = this.mdcEncoder.getSamples();
+        app.globalData.mdcPacket = g711.MDC2g711Encode(samples8k);
 
-      // Opus MDC: native 16000 Hz samples → Opus encode (async, non-blocking)
-      app.globalData.mdcOpusFrames = null;
-      const mdcEncoder16k = new mdc.MDC1200Encoder(16000);
-      mdcEncoder16k.setPreamble(10);
-      mdcEncoder16k.setPacket(0x01, 0x00, mdcId);
-      const samples16k = mdcEncoder16k.getSamples();
-      opus.encodeMdcToOpusFrames(samples16k).then(frames => {
-        app.globalData.mdcOpusFrames = frames;
-        console.log(`MDC Opus pre-encoded: ${frames.length} frames`);
-      }).catch(err => {
-        console.warn('MDC Opus pre-encode failed, will fallback to G711 MDC:', err);
-      });
+        // Opus MDC: native 16000 Hz samples → Opus encode (async, non-blocking)
+        app.globalData.mdcOpusFrames = null;
+        const mdcEncoder16k = new mdc.MDC1200Encoder(16000);
+        mdcEncoder16k.setPreamble(10);
+        mdcEncoder16k.setPacket(0x01, 0x00, mdcId);
+        const samples16k = mdcEncoder16k.getSamples();
+        opus.encodeMdcToOpusFrames(samples16k).then(frames => {
+          app.globalData.mdcOpusFrames = frames;
+          console.log(`MDC Opus pre-encoded: ${frames.length} frames`);
+        }).catch(err => {
+          console.warn('MDC Opus pre-encode failed, will fallback to G711 MDC:', err);
+        });
+        app.globalData.mdcEncodedMdcId = mdcId;
+      }
     } catch (e) {
       console.error('MDC Init Error:', e);
     }
@@ -170,6 +176,12 @@ Page({
 
   async onShow() {
     wx.setKeepScreenOn({ keepScreenOn: true });
+
+    // 监听页上点"加入群组"但未登录时，回本页后弹出当前服务器的登录框
+    if (app.globalData.pendingServerLogin) {
+      app.globalData.pendingServerLogin = false;
+      this.showServerLoginModal();
+    }
 
     await this.recoverVoiceRuntime({ clearAudio: false });
     this.refreshData();
@@ -275,9 +287,20 @@ Page({
   },
 
   async refreshData(silent = false) {
+    // token 可能因 50008 被拦截器降级清除，同步登录态徽标
+    const authed = !!wx.getStorageSync('token');
+    if (authed !== this.data.serverAuthed) {
+      this.setData({ serverAuthed: authed });
+    }
+
     const currentDevice = await app.globalData.getDevice(app.globalData.userInfo.callsign, 100, silent);
     app.globalData.currentDevice = currentDevice;
-    const group = await app.globalData.getGroup(currentDevice?.group_id, silent);
+    // 设备未建档（刚切换服务器、心跳还没注册）时不存在"未加入群组"状态：
+    // 按协议心跳会自动落进 0 号公共群组，直接按 0 号群显示
+    const groupId = (currentDevice && currentDevice.group_id !== undefined && currentDevice.group_id !== null)
+      ? currentDevice.group_id
+      : 0;
+    const group = await app.globalData.getGroup(groupId, silent);
 
     if (group) {
       const devlist = Object.values(group.devmap || {});
@@ -294,17 +317,24 @@ Page({
           deviceCount: devlist.length
         });
       }
-    } else if (
-      this.data.currentGroup !== '未加入群组' ||
-      this.data.onlineCount !== 0 ||
-      this.data.deviceCount !== 0
-    ) {
-      this.setData({
-        currentGroup: '未加入群组',
-        onlineCount: 0,
-        deviceCount: 0
-      });
+    } else if (groupId === 0) {
+      // 0 号群固定是公共大厅：群组详情拉取失败（设备未建档、网络抖动等）时也直接显示，
+      // 不存在"未加入群组"/STANDBY 状态
+      if (this.data.currentGroup !== '公共大厅') {
+        this.setData({ currentGroup: '公共大厅' });
+      }
+    } else if (groupId >= 1 && groupId <= 3) {
+      // 1~3 号是每个账号默认的私有房间（个人房间1/2/3），名称固定；
+      // 未登录时后端不返回私有群详情，直接按固定名显示
+      const name = '个人房间' + groupId;
+      if (this.data.currentGroup !== name) {
+        this.setData({ currentGroup: name });
+      }
+    } else if (!this.data.currentGroup) {
+      // 详情拉取失败的其他群组（网络/服务器异常），先按群号占位显示
+      this.setData({ currentGroup: '群组 ' + groupId });
     }
+    // 已有显示时拉取失败保持不变，不覆盖成错误状态
   },
 
   startHeartbeat() {
@@ -375,6 +405,11 @@ Page({
   },
 
   // Event Handlers
+  // 点击顶部呼号：打开当前服务器的实时语音监听页（/ws/calls）
+  openMonitor() {
+    wx.navigateTo({ url: '/pages/monitor/monitor' });
+  },
+
   onCodecSelect(e) {
     if (this.data.isTalking) return;
 
@@ -522,66 +557,15 @@ Page({
 
 
 
-  async loadAvailableGroups() {
-    try {
-      const groups = await app.globalData.getGroupList() || [];
-      const validatedGroups = groups.map(group => ({
-        ...group,
-        displayGroupName: `${group.id} - ${group.name}`
-      }));
-      this.setData({ availableGroupsForPicker: validatedGroups });
-    } catch (error) {
-      console.error('Error loading groups:', error);
-    }
-  },
-
-  showGroupModal() {
-    const { currentDevice } = app.globalData;
-    this.setData({
-      showGroupModal: true,
-      currentGroupId: currentDevice?.group_id ?? null
-    });
-  },
-
-  hideGroupModal() {
-    this.setData({ showGroupModal: false });
-  },
-
-  async onGroupCardSelect(e) {
-    const selectedIndex = e.currentTarget.dataset.index;
-    const selectedGroup = this.data.availableGroupsForPicker[selectedIndex];
-    const { currentDevice } = app.globalData;
-
-    if (!selectedGroup || !currentDevice) return;
-
-    this.setData({ showGroupModal: false });
-    wx.showLoading({ title: '正在切换群组...' });
-    try {
-      await updateDevice({
-        ...currentDevice,
-        group_id: selectedGroup.id,
-        last_voice_begin_time: "0001-01-01T00:00:00Z",
-        last_voice_end_time: "0001-01-01T00:00:00Z",
-      });
-      wx.showToast({ title: '切换成功', icon: 'success' });
-      await this.refreshData();
-    } catch (error) {
-      wx.showToast({ title: '切换失败', icon: 'none' });
-    } finally {
-      wx.hideLoading();
-    }
-  },
-
   async showOnlineDevices() {
     try {
       const currentDevice = app.globalData.currentDevice;
-      // 公共大厅 group_id 为 0，不能用 falsy 判断
-      if (!currentDevice || currentDevice.group_id === undefined || currentDevice.group_id === null) {
-        wx.showToast({ title: '未加入群组', icon: 'none' });
-        return;
-      }
+      // 设备未建档时默认在 0 号公共群组（心跳自动落 0 号群）
+      const groupId = (currentDevice && currentDevice.group_id !== undefined && currentDevice.group_id !== null)
+        ? currentDevice.group_id
+        : 0;
 
-      const group = await app.globalData.getGroup(currentDevice.group_id);
+      const group = await app.globalData.getGroup(groupId);
       if (!group || !group.devmap) {
         this.setData({
           showOnlineModal: true,
@@ -643,10 +627,11 @@ Page({
   },
 
   handleServerClick() {
-    // Load saved credentials for current selection
-    const index = this.data.tempServerIndex;
-    this.loadCredentialsForIndex(index);
-    this.setData({ showServerModal: true });
+    // 刷新各服务器登录态标记（用于服务器卡片上的"已登录"提示）
+    this.setData({
+      showServerModal: true,
+      authedHosts: wx.getStorageSync('serverTokens') || {}
+    });
   },
 
   hideServerModal() {
@@ -656,22 +641,119 @@ Page({
   onServerCardSelect(e) {
     const index = e.currentTarget.dataset.index;
     this.setData({ tempServerIndex: index });
-    this.loadCredentialsForIndex(index);
   },
 
-  loadCredentialsForIndex(index) {
+  // 管理功能（如切换群组）需要登录态时，弹出当前服务器的登录框
+  showServerLoginModal() {
+    const host = app.globalData.serverConfig.host;
     const serverCredentials = wx.getStorageSync('serverCredentials') || {};
-    const creds = serverCredentials[index];
-    if (creds) {
-      this.setData({
-        tempUsername: creds.username,
-        tempPassword: creds.password
-      });
-    } else {
-      this.setData({
-        tempUsername: '',
-        tempPassword: ''
-      });
+    const creds = serverCredentials[host];
+    this.setData({
+      tempUsername: creds ? creds.username : '',
+      tempPassword: creds ? creds.password : '',
+      showLoginModal: true
+    });
+    this.getServerOidcConfig();
+  },
+
+  // 查询当前服务器是否开启 OIDC 登录；不支持或未开启时隐藏 OIDC 按钮
+  getServerOidcConfig() {
+    const host = app.globalData.serverConfig && app.globalData.serverConfig.host;
+    if (!host) {
+      this.setData({ oidcConfig: { enabled: false, button_name: '' } });
+      return;
+    }
+    wx.request({
+      url: 'https://' + host + '/user/oidc/config',
+      method: 'GET',
+      header: { 'content-type': 'application/json' },
+      success: (res) => {
+        // 兼容 {code: 20000, data: {...}} 包裹和直接返回两种形式
+        const data = (res.data && res.data.code === 20000 ? res.data.data : res.data) || {};
+        this.setData({
+          oidcConfig: { enabled: !!data.enabled, button_name: data.button_name || '' }
+        });
+      },
+      fail: (err) => {
+        console.error('获取 OIDC 配置失败：', err);
+        this.setData({ oidcConfig: { enabled: false, button_name: '' } });
+      }
+    });
+  },
+
+  // OIDC 登录：web-view 打开当前服务器的 OIDC 入口，认证完成后后端经 jweixin
+  // reLaunch 回 /pages/login/login?oidc_token=...，由登录页收尾后回到通话页
+  oidcServerLogin() {
+    const host = app.globalData.serverConfig && app.globalData.serverConfig.host;
+    if (!host) return;
+    const url = 'https://' + host + '/user/oidc/login';
+    wx.navigateTo({
+      url: '/pages/webview/webview?mode=oidc&url=' + encodeURIComponent(url)
+    });
+  },
+
+  hideLoginModal() {
+    this.setData({ showLoginModal: false });
+  },
+
+  // 登录当前服务器（不改变语音身份之外的服务器选择），成功后恢复管理态
+  async doServerLogin() {
+    const { tempUsername, tempPassword } = this.data;
+    if (!tempUsername || !tempPassword) {
+      wx.showToast({ title: '请输入用户名和密码', icon: 'none' });
+      return;
+    }
+
+    if (this.isLoggingIn) return;
+    this.isLoggingIn = true;
+    wx.showLoading({ title: '正在登录...' });
+
+    const api = require('../../utils/api');
+    const host = app.globalData.serverConfig.host;
+
+    try {
+      const res = await api.login({ username: tempUsername, password: tempPassword });
+
+      if (res && res.token) {
+        wx.setStorageSync('token', res.token);
+        app.globalData.token = res.token;
+
+        try {
+          // token 与凭据都按 host 关联
+          const serverTokens = wx.getStorageSync('serverTokens') || {};
+          serverTokens[host] = res.token;
+          wx.setStorageSync('serverTokens', serverTokens);
+          const serverCredentials = wx.getStorageSync('serverCredentials') || {};
+          serverCredentials[host] = { username: tempUsername, password: tempPassword };
+          wx.setStorageSync('serverCredentials', serverCredentials);
+        } catch (err) {
+          console.error('存储失败:', err);
+        }
+
+        // 该服务器上的账号身份（呼号/MDC/DMR）可能与切换前不同，刷新用户信息和语音包头
+        const userInfo = await api.getUserInfo();
+        if (userInfo && userInfo.callsign) {
+          wx.setStorageSync('userInfo', userInfo);
+          app.globalData.userInfo = userInfo;
+          const { generateAPRSPasscode } = require('../../utils/aprs');
+          const passcode = generateAPRSPasscode(userInfo.callsign);
+          app.globalData.passcode = passcode;
+          wx.setStorageSync('passcode', passcode);
+          this.setData({ userInfo });
+        }
+
+        this.setData({ showLoginModal: false, serverAuthed: true });
+        await this.rebuildVoiceSession();
+        wx.showToast({ title: '登录成功', icon: 'success' });
+      } else if (res !== undefined) {
+        // res === undefined 时拦截器已 toast 业务错误，不再重复提示
+        wx.showToast({ title: '用户名或密码错误', icon: 'none' });
+      }
+    } catch (err) {
+      wx.showToast({ title: err.message || '登录失败', icon: 'none' });
+    } finally {
+      this.isLoggingIn = false;
+      wx.hideLoading();
     }
   },
 
@@ -683,94 +765,83 @@ Page({
     this.setData({ tempPassword: e.detail.value });
   },
 
+  // 切换/登录后的语音会话重建：UDP、心跳、群组数据
+  async rebuildVoiceSession() {
+    this.closeUdpClient();
+    this.stopHeartbeat();
+    await this.initMdcAndUdp();
+    this.ensureAudioRunning();
+    this.startHeartbeat();
+    await this.refreshData();
+  },
+
+  // 直接切换服务器：NRL 语音通联只依赖呼号+SSID（UDP 心跳），不要求登录。
+  // 切换后恢复该服务器缓存的 token（如有）；没有则进入"未登录仅通联"模式，
+  // 管理操作（切换群组等）时再提示登录
   async confirmServerSwitch() {
-    const { tempServerIndex, tempUsername, tempPassword, serverList } = this.data;
-    if (!tempUsername || !tempPassword) {
-      wx.showToast({ title: '请输入用户名和密码', icon: 'none' });
-      return;
-    }
+    const { tempServerIndex, serverList } = this.data;
 
     const selectedServer = serverList[tempServerIndex];
     if (!selectedServer) return;
+
+    if (selectedServer.host === app.globalData.serverConfig.host) {
+      this.setData({ showServerModal: false });
+      return;
+    }
 
     if (this.isSwitching) return;
     this.isSwitching = true;
     wx.showLoading({ title: '正在切换...' });
 
-    // 提到 try 外，登录网络异常时 catch 里才能回滚 globalData.serverConfig
-    const oldConfig = { ...app.globalData.serverConfig };
-
     try {
-      // 1. Save credentials
-      const serverCredentials = wx.getStorageSync('serverCredentials') || {};
-      serverCredentials[tempServerIndex] = { username: tempUsername, password: tempPassword };
-      wx.setStorageSync('serverCredentials', serverCredentials);
-
-      // 2. Perform Login
-      const api = require('../../utils/api');
-
-      // Update global config temporarily for login
       app.globalData.serverConfig = {
         name: selectedServer.name,
         host: selectedServer.host,
         port: selectedServer.port || 60050
       };
 
-      const res = await api.login({ username: tempUsername, password: tempPassword });
-
-      if (res.token) {
-        // Login Success
-        wx.setStorageSync('token', res.token);
-
-        // 3. Get User Info
-        const userInfo = await api.getUserInfo();
-        if (!userInfo.callsign) throw new Error('用户信息缺少呼号');
-
-        wx.setStorageSync('userInfo', userInfo);
-        app.globalData.userInfo = userInfo;
-
-        const { generateAPRSPasscode } = require('../../utils/aprs');
-        const passcode = generateAPRSPasscode(userInfo.callsign);
-        app.globalData.passcode = passcode;
-        wx.setStorageSync('passcode', passcode);
-
-        // 4. Update Page Data
-        this.setData({
-          userInfo: userInfo,
-          serverConfig: app.globalData.serverConfig,
-          serverConnected: false, // Reset status
-          showServerModal: false,
-          currentGroup: null,
-          onlineCount: 0,
-          deviceCount: 0
-        });
-
-        // 5. Re-initialize Connection
-        this.closeUdpClient();
-
-        // Clear timers
-        this.stopHeartbeat();
-
-        // Re-init
-        await this.initMdcAndUdp();
-        this.ensureAudioRunning();
-        this.startHeartbeat();
-        this.loadAvailableGroups(); // Reload groups for new server
-        await this.refreshData();
-
-        wx.showToast({ title: '切换成功', icon: 'success' });
-
+      // 恢复该服务器上次的登录态；没有则清除当前 token，进入未登录模式
+      const serverTokens = wx.getStorageSync('serverTokens') || {};
+      const token = serverTokens[selectedServer.host] || '';
+      if (token) {
+        wx.setStorageSync('token', token);
+        app.globalData.token = token;
       } else {
-        // Revert config if login failed
-        app.globalData.serverConfig = oldConfig;
-        wx.showToast({ title: '用户名或密码错误', icon: 'none' });
+        wx.removeStorageSync('token');
+        app.globalData.token = null;
       }
+
+      try {
+        wx.setStorageSync('serverConfig', app.globalData.serverConfig);
+        wx.setStorageSync('savedServerHost', selectedServer.host);
+        wx.setStorageSync('savedServerIndex', tempServerIndex);
+      } catch (err) {
+        console.error('存储失败:', err);
+      }
+
+      this.setData({
+        serverConfig: app.globalData.serverConfig,
+        serverAuthed: !!token,
+        serverConnected: false, // Reset status
+        showServerModal: false,
+        currentGroup: null,
+        onlineCount: 0,
+        deviceCount: 0
+      });
+
+      // 群组/QTH 缓存是上一台服务器的数据，切换后必须清掉
+      app.globalData.groupCache = {};
+      app.globalData.qthCache = null;
+
+      await this.rebuildVoiceSession();
+
+      wx.showToast({
+        title: token ? '切换成功' : '已切换，未登录仅可通联',
+        icon: 'none'
+      });
 
     } catch (err) {
       console.error('Switch Error:', err);
-      // Revert config on error: globalData.serverConfig may already point at
-      // the new server while UDP/heartbeat are still on the old connection
-      app.globalData.serverConfig = oldConfig;
       wx.showToast({ title: err.message || '切换失败', icon: 'none' });
     } finally {
       this.isSwitching = false;

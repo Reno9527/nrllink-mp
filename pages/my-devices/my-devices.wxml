@@ -57,6 +57,12 @@
     </view>
   </view>
 
+  <view class="empty" wx:if="{{loaded && needLogin}}">
+    <text class="empty-text">未登录当前服务器</text>
+    <text class="empty-tip">停留在当前房间通话不受影响；切换房间、管理设备需要登录</text>
+    <button class="empty-login-btn" bindtap="goLogin">去登录</button>
+  </view>
+
   <view class="empty" wx:if="{{loaded && loadError}}" bindtap="loadDevices">
     <text class="empty-text">加载失败，点击重试</text>
   </view>

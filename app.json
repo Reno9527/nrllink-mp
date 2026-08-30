@@ -15,10 +15,11 @@
     "pages/device-settings/device-settings",
     "pages/privacy-policy/privacy-policy",
     "pages/user-agreement/user-agreement",
-    "pages/webview/webview"
+    "pages/webview/webview",
+    "pages/monitor/monitor"
   ],
   "window": {
-    "navigationBarTitleText": "NRL互联1.8.10"
+    "navigationBarTitleText": "NRL互联1.8.11"
   },
   "tabBar": {
     "list": [

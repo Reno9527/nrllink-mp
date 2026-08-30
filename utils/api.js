@@ -15,7 +15,7 @@ const requestInterceptor = (config) => {
 };
 
 // 响应拦截器
-const responseInterceptor = (response) => {
+const responseInterceptor = (response, config = {}) => {
   // wx.hideLoading();
   if (response.statusCode !== 200) {
     throw new Error('网络请求失败');
@@ -27,14 +27,49 @@ const responseInterceptor = (response) => {
     return response.data.data;
   } else if (response.data.code === 20001) {
     // 服务器的错误消息在 data.message 里（顶层 message 可能为空）
-    wx.showToast({
-      title: response.data.message || (response.data.data && response.data.data.message) || '操作失败',
-      icon: 'error',
-      duration: 5000 // Further increase the duration for the success message
-    });
+    if (!config.silent) {
+      wx.showToast({
+        title: response.data.message || (response.data.data && response.data.data.message) || '操作失败',
+        icon: 'error',
+        duration: 5000 // Further increase the duration for the success message
+      });
+    }
 
     return
 
+  } else if (response.data.code === 50008) {
+    // 登录态失效（token 过期或服务器重启）：降级为未登录。
+    // 只清除"这次请求实际携带的 token"对应服务器的凭证 —— 不能无条件清全局 token，
+    // 否则切换服务器后旧服务器的迟到 50008 响应会误清新服务器的登录态
+    const reqToken = config.header && config.header['x-token'];
+    const hostMatch = /^https:\/\/([^/]+)/.exec(config.url || '');
+    const reqHost = hostMatch && hostMatch[1];
+    if (reqToken && reqHost) {
+      const app = getApp();
+      // 缓存的还是这个 token 才删除（可能已被新登录刷新）
+      const serverTokens = wx.getStorageSync('serverTokens') || {};
+      if (serverTokens[reqHost] === reqToken) {
+        delete serverTokens[reqHost];
+        wx.setStorageSync('serverTokens', serverTokens);
+      }
+      // 只有当前仍连着这台服务器、且当前 token 就是失效的那个，才降级全局登录态
+      const curHost = app.globalData.serverConfig && app.globalData.serverConfig.host;
+      if (reqHost === curHost && wx.getStorageSync('token') === reqToken) {
+        wx.removeStorageSync('token');
+        app.globalData.token = null;
+        if (!config.silent) {
+          wx.showToast({
+            title: '登录已过期，管理功能需重新登录',
+            icon: 'none'
+          });
+        }
+      }
+    }
+    // 业务确定性错误，打标记让重试循环直接抛出，调用方据此提示"请先登录"
+    const error = new Error('未登录或登录已过期');
+    error.authError = true;
+    error.noRetry = true;
+    throw error;
   }
 
   // 其他状态码需要跳转登录页
@@ -90,7 +125,7 @@ const request = async (options, retries = 3, timeout = 10000) => {
             ...config,
             success: (res) => {
               try {
-                const data = responseInterceptor(res);
+                const data = responseInterceptor(res, { url: config.url, header: config.header, silent: !!options.silent });
                 resolve(data);
               } catch (error) {
                 reject(error);

@@ -1,0 +1,277 @@
+.container {
+  min-height: 100vh;
+  background: #f5f6f7;
+  padding: 20rpx;
+  box-sizing: border-box;
+}
+
+/* 顶栏：连接状态 + 服务器名 + 统计 */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16rpx 20rpx;
+  background: #fff;
+  border-radius: 12rpx;
+  margin-bottom: 16rpx;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.conn-dot {
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  margin-right: 12rpx;
+  flex-shrink: 0;
+}
+
+.conn-dot.on {
+  background: #07c160;
+}
+
+.conn-dot.off {
+  background: #d9d9d9;
+}
+
+.server-name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats {
+  font-size: 22rpx;
+  color: #999;
+  flex-shrink: 0;
+  margin-left: 16rpx;
+}
+
+/* 未登录提示条 */
+.auth-tip {
+  font-size: 22rpx;
+  color: #b26a00;
+  background: #fff7e6;
+  border: 2rpx solid #ffe1a8;
+  border-radius: 12rpx;
+  padding: 14rpx 20rpx;
+  margin-bottom: 16rpx;
+}
+
+.empty-hint {
+  text-align: center;
+  color: #999;
+  font-size: 26rpx;
+  padding: 80rpx 0;
+}
+
+/* 房间格子：flex 换行，列数由 JS 按屏宽定（cols-2/cols-3/cols-4），rpx 定宽随屏幕缩放 */
+.room-grid {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.room-box {
+  width: 339rpx; /* 2 列：列表宽 710rpx（容器去掉 40rpx 内边距）/2 - 16rpx 边距 */
+  margin: 8rpx;
+  background: #fff;
+  border: 2rpx solid #e8e8e8;
+  border-radius: 12rpx;
+  padding: 20rpx;
+  box-sizing: border-box;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.room-grid.cols-3 .room-box {
+  width: 220rpx; /* 3 列：710/3 - 16rpx 边距 */
+}
+
+.room-grid.cols-4 .room-box {
+  width: 161rpx; /* 4 列：710/4 - 16rpx 边距 */
+}
+
+.room-box:active {
+  opacity: 0.7;
+}
+
+/* 房间类型底色（与后端 group.Type 对应） */
+.rt-0 { background: #ffffff; }              /* 公共房间 */
+.rt-1 { background: #f2edfd; }              /* 中继互联：淡紫 */
+.rt-2 { background: #e8f6f4; }              /* 设备互联：淡青 */
+.rt-4 { background: #e8f3fe; }              /* 数模互联：淡蓝 */
+.rt-5 { background: #fdf1e4; }              /* 俱乐部：淡橙 */
+.rt-6 { background: #faf3e0; }              /* 车友会：淡黄 */
+.rt-7 { background: #fdeef0; }              /* 会议组：淡红 */
+.rt-8 { background: #efeff2; }              /* 私密房间：淡灰 */
+
+/* 正在通话：点亮（盖过类型底色） */
+.room-box.speaking {
+  background: #f0fdf4;
+  border-color: #07c160;
+  animation: speaking-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes speaking-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(7, 193, 96, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 10rpx rgba(7, 193, 96, 0);
+  }
+}
+
+/* 已订阅 */
+.room-box.subscribed {
+  border-color: #576b95;
+}
+
+.room-box.speaking.subscribed {
+  border-color: #07c160;
+  background: #e8f9ef;
+}
+
+/* 当前所在群组 */
+.room-box.current {
+  border-color: #07c160;
+}
+
+.room-head {
+  margin-bottom: 10rpx;
+}
+
+/* 房间名最多两行，超出省略；固定两行高度保持盒子对齐 */
+.room-name {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #333;
+  line-height: 33rpx;
+  min-height: 66rpx;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+/* 类型标签 + 在线/状态（状态合并到本行，不再单独占一行） */
+.room-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8rpx;
+  margin-bottom: 10rpx;
+}
+
+.room-type {
+  font-size: 20rpx;
+  color: #666;
+  background: rgba(255, 255, 255, 0.65);
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  flex-shrink: 0;
+}
+
+.room-state {
+  font-size: 20rpx;
+  color: #999;
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-state.on {
+  color: #07c160;
+  font-weight: 600;
+}
+
+.room-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8rpx;
+  margin-top: 12rpx;
+}
+
+/* 收听订阅按钮（左下）：未订阅描边，订阅中实心 */
+.listen-btn {
+  font-size: 22rpx;
+  color: #576b95;
+  background: rgba(255, 255, 255, 0.75);
+  border: 2rpx solid #576b95;
+  border-radius: 8rpx;
+  padding: 6rpx 22rpx;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.listen-btn.on {
+  color: #fff;
+  background: #576b95;
+}
+
+.listen-btn:active {
+  opacity: 0.8;
+}
+
+.current-tag {
+  font-size: 20rpx;
+  color: #07c160;
+  background: #e8f9ef;
+  border: 2rpx solid #07c160;
+  border-radius: 8rpx;
+  padding: 4rpx 14rpx;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.join-btn {
+  font-size: 22rpx;
+  color: #fff;
+  background: #07c160;
+  border-radius: 8rpx;
+  padding: 6rpx 22rpx;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.join-btn:active {
+  opacity: 0.8;
+}
+
+/* 未登录当前服务器：加入不可用（置灰，点了会提示去登录） */
+.join-btn.disabled {
+  background: #c8c9cc;
+}
+
+/* 3/4 列窄盒子：底部按钮等分一行、缩小字号内边距，避免折行 */
+.room-grid.cols-3 .listen-btn,
+.room-grid.cols-3 .join-btn,
+.room-grid.cols-3 .current-tag,
+.room-grid.cols-4 .listen-btn,
+.room-grid.cols-4 .join-btn,
+.room-grid.cols-4 .current-tag {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 20rpx;
+  padding-left: 4rpx;
+  padding-right: 4rpx;
+}
+
+.room-grid.cols-3 .current-tag,
+.room-grid.cols-4 .current-tag {
+  font-size: 18rpx;
+}
